@@ -1,0 +1,161 @@
+---
+title: "R Project"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+## Load the data
+
+```{r}
+movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+```
+
+## Verify the data
+
+```{r}
+str(movie_profit)
+```
+
+## Check variable types and first 5 values
+
+```{r}
+for (var_name in names(movie_profit)) {
+	var_data <- movie_profit[[var_name]]
+	cat("Variable:", var_name, "\n")
+	cat("Type:", class(var_data), "\n")
+	cat("First 5 values:\n")
+	print(head(var_data, 5))
+	cat("\n")
+}
+```
+
+## Check for missing values, duplicates, and logical consistency
+
+```{r}
+cat("Rows:", nrow(movie_profit), "\n")
+cat("Columns:", ncol(movie_profit), "\n\n")
+
+# Missing values (NA or blank strings)
+missing_count <- sapply(movie_profit, function(x) {
+	if (is.character(x)) {
+		sum(is.na(x) | trimws(x) == "")
+	} else {
+		sum(is.na(x))
+	}
+})
+
+missing_pct <- round(100 * missing_count / nrow(movie_profit), 2)
+missing_summary <- data.frame(
+	variable = names(missing_count),
+	missing_count = as.integer(missing_count),
+	missing_percent = missing_pct,
+	row.names = NULL
+)
+
+cat("Missing value summary:\n")
+print(missing_summary)
+
+# Duplicate rows
+dup_rows <- duplicated(movie_profit)
+dup_count <- sum(dup_rows)
+if (dup_count == 0) {
+	cat("\nno duplicate rows found\n")
+} else {
+	cat("\nDuplicate rows:", dup_count, "\n")
+}
+
+# Numeric column checks
+numeric_cols <- c("production_budget", "domestic_gross", "worldwide_gross")
+for (col in numeric_cols) {
+	if (col %in% names(movie_profit)) {
+		x <- movie_profit[[col]]
+		cat(col, "negative values:", sum(x < 0, na.rm = TRUE), "\n")
+		cat(col, "zero values:", sum(x == 0, na.rm = TRUE), "\n\n")
+	}
+}
+
+# Logical consistency check
+if (all(c("domestic_gross", "worldwide_gross") %in% names(movie_profit))) {
+	bad_gross_rows <- which(movie_profit$worldwide_gross < movie_profit$domestic_gross)
+	cat("Rows where worldwide_gross < domestic_gross:", length(bad_gross_rows), "\n")
+
+	if (length(bad_gross_rows) > 0) {
+		print(head(movie_profit[bad_gross_rows, c("movie", "domestic_gross", "worldwide_gross")], 5))
+	}
+}
+
+# Date parsing check
+if ("release_date" %in% names(movie_profit)) {
+	parsed_dates <- as.Date(movie_profit$release_date, format = "%m/%d/%Y")
+	bad_date_rows <- which(
+		is.na(parsed_dates) &
+			!is.na(movie_profit$release_date) &
+			trimws(movie_profit$release_date) != ""
+	)
+
+	cat("Invalid release_date values:", length(bad_date_rows), "\n")
+	if (length(bad_date_rows) > 0) {
+		print(head(movie_profit$release_date[bad_date_rows], 5))
+	}
+}
+```
+
+## Estimate impact of removing rows with missing values or gross = 0
+
+```{r}
+# Row-level missing values (NA or blank strings) across all columns
+row_has_missing <- apply(movie_profit, 1, function(row) {
+	any(is.na(row) | trimws(as.character(row)) == "")
+})
+
+# Rows where either gross column is exactly zero
+gross_is_zero <-
+	movie_profit$domestic_gross == 0 |
+	movie_profit$worldwide_gross == 0
+
+overlap_count <- sum(row_has_missing & gross_is_zero)
+remove_all_count <- sum(row_has_missing | gross_is_zero)
+total_movies <- nrow(movie_profit)
+remove_all_pct <- round(100 * remove_all_count / total_movies, 2)
+
+cat("Rows with at least one missing value:", sum(row_has_missing), "\n")
+cat("Rows with gross value 0 (domestic or worldwide):", sum(gross_is_zero), "\n")
+cat("Overlap (missing and gross=0):", overlap_count, "\n")
+cat("Number of movies with at least one missing value or gross value 0:", remove_all_count, "(", remove_all_pct, "%)\n")
+
+# Same calculation, but ignore missing values in mpaa_rating
+cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
+row_has_missing_no_rating <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
+
+remove_no_rating_count <- sum(row_has_missing_no_rating | gross_is_zero)
+remove_no_rating_pct <- round(100 * remove_no_rating_count / total_movies, 2)
+
+cat("Number of movies with at least one missing value or gross value 0 (ignoring mpaa_rating):", remove_no_rating_count, "(", remove_no_rating_pct, "%)\n")
+```
+
+## Remove rows with missing values (except rating) and gross = 0
+
+```{r}
+cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
+
+row_has_NA <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
+
+gross_is_zero <-
+	movie_profit$domestic_gross == 0 |
+	movie_profit$worldwide_gross == 0
+
+movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
+
+cat("Rows before cleaning:", nrow(movie_profit), "\n")
+cat("Rows after cleaning:", nrow(movie_profit_clean), "\n")
+cat("Rows removed:", nrow(movie_profit) - nrow(movie_profit_clean), "\n\n")
+```
