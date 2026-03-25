@@ -1,6 +1,6 @@
 ---
-title: "R Project"
-author: "Your Name"
+title: "Movie Data Analysis"
+author: "TBD"
 date: "`r Sys.Date()`"
 output: html_document
 ---
@@ -9,41 +9,52 @@ output: html_document
 knitr::opts_chunk$set(
 	echo = FALSE,
 	message = FALSE,
-	warning = FALSE
+	warning = FALSE,
+	comment = NA,
+	fig.align = "center",
+	fig.width = 10,
+	fig.height = 5,
+	out.width = "100%"
 )
 ```
 
-## Load the data
+## Load and verify the data
 
 ```{r}
 movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+
+overview_table <- data.frame(
+	Metric = c("Rows", "Columns", "Numeric columns", "Character columns"),
+	Value = c(
+		nrow(movie_profit),
+		ncol(movie_profit),
+		sum(sapply(movie_profit, is.numeric)),
+		sum(sapply(movie_profit, is.character))
+	)
+)
+
+knitr::kable(overview_table, caption = "Dataset overview")
 ```
 
-## Verify the data
-
-```{r}
-str(movie_profit)
-```
 
 ## Check variable types and first 5 values
 
 ```{r}
-for (var_name in names(movie_profit)) {
-	var_data <- movie_profit[[var_name]]
-	cat("Variable:", var_name, "\n")
-	cat("Type:", class(var_data), "\n")
-	cat("First 5 values:\n")
-	print(head(var_data, 5))
-	cat("\n")
-}
+variable_overview <- data.frame(
+	variable = names(movie_profit),
+	type = sapply(movie_profit, function(x) class(x)[1]),
+	first_5_values = sapply(movie_profit, function(x) {
+		paste(head(x, 5), collapse = ", ")
+	}),
+	row.names = NULL
+)
+
+knitr::kable(variable_overview, caption = "Variable types and first 5 values")
 ```
 
 ## Check for missing values, duplicates, and logical consistency
 
 ```{r}
-cat("Rows:", nrow(movie_profit), "\n")
-cat("Columns:", ncol(movie_profit), "\n\n")
-
 # Missing values (NA or blank strings)
 missing_count <- sapply(movie_profit, function(x) {
 	if (is.character(x)) {
@@ -61,39 +72,36 @@ missing_summary <- data.frame(
 	row.names = NULL
 )
 
-cat("Missing value summary:\n")
-print(missing_summary)
-
 # Duplicate rows
 dup_rows <- duplicated(movie_profit)
 dup_count <- sum(dup_rows)
-if (dup_count == 0) {
-	cat("\nno duplicate rows found\n")
-} else {
-	cat("\nDuplicate rows:", dup_count, "\n")
-}
 
 # Numeric column checks
 numeric_cols <- c("production_budget", "domestic_gross", "worldwide_gross")
+numeric_checks <- data.frame()
 for (col in numeric_cols) {
 	if (col %in% names(movie_profit)) {
 		x <- movie_profit[[col]]
-		cat(col, "negative values:", sum(x < 0, na.rm = TRUE), "\n")
-		cat(col, "zero values:", sum(x == 0, na.rm = TRUE), "\n\n")
+		numeric_checks <- rbind(
+			numeric_checks,
+			data.frame(
+				variable = col,
+				negative_values = sum(x < 0, na.rm = TRUE),
+				zero_values = sum(x == 0, na.rm = TRUE)
+			)
+		)
 	}
 }
 
 # Logical consistency check
+bad_gross_count <- NA
 if (all(c("domestic_gross", "worldwide_gross") %in% names(movie_profit))) {
 	bad_gross_rows <- which(movie_profit$worldwide_gross < movie_profit$domestic_gross)
-	cat("Rows where worldwide_gross < domestic_gross:", length(bad_gross_rows), "\n")
-
-	if (length(bad_gross_rows) > 0) {
-		print(head(movie_profit[bad_gross_rows, c("movie", "domestic_gross", "worldwide_gross")], 5))
-	}
+	bad_gross_count <- length(bad_gross_rows)
 }
 
 # Date parsing check
+bad_date_count <- NA
 if ("release_date" %in% names(movie_profit)) {
 	parsed_dates <- as.Date(movie_profit$release_date, format = "%m/%d/%Y")
 	bad_date_rows <- which(
@@ -101,12 +109,24 @@ if ("release_date" %in% names(movie_profit)) {
 			!is.na(movie_profit$release_date) &
 			trimws(movie_profit$release_date) != ""
 	)
-
-	cat("Invalid release_date values:", length(bad_date_rows), "\n")
-	if (length(bad_date_rows) > 0) {
-		print(head(movie_profit$release_date[bad_date_rows], 5))
-	}
+	bad_date_count <- length(bad_date_rows)
 }
+
+knitr::kable(missing_summary, caption = "Missing values by variable")
+
+dup_table <- data.frame(
+	metric = "Duplicate rows",
+	count = dup_count
+)
+knitr::kable(dup_table, caption = "Duplicate row summary")
+
+knitr::kable(numeric_checks, caption = "Numeric consistency checks")
+
+logic_table <- data.frame(
+	check = c("Rows where worldwide_gross < domestic_gross", "Invalid release_date values"),
+	count = c(bad_gross_count, bad_date_count)
+)
+knitr::kable(logic_table, caption = "Logical consistency checks")
 ```
 
 ## Estimate impact of removing rows with missing values or gross = 0
@@ -127,11 +147,6 @@ remove_all_count <- sum(row_has_missing | gross_is_zero)
 total_movies <- nrow(movie_profit)
 remove_all_pct <- round(100 * remove_all_count / total_movies, 2)
 
-cat("Rows with at least one missing value:", sum(row_has_missing), "\n")
-cat("Rows with gross value 0 (domestic or worldwide):", sum(gross_is_zero), "\n")
-cat("Overlap (missing and gross=0):", overlap_count, "\n")
-cat("Number of movies with at least one missing value or gross value 0:", remove_all_count, "(", remove_all_pct, "%)\n")
-
 # Same calculation, but ignore missing values in mpaa_rating
 cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
 row_has_missing_no_rating <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
@@ -139,7 +154,31 @@ row_has_missing_no_rating <- !complete.cases(movie_profit[, cols_except_rating, 
 remove_no_rating_count <- sum(row_has_missing_no_rating | gross_is_zero)
 remove_no_rating_pct <- round(100 * remove_no_rating_count / total_movies, 2)
 
-cat("Number of movies with at least one missing value or gross value 0 (ignoring mpaa_rating):", remove_no_rating_count, "(", remove_no_rating_pct, "%)\n")
+impact_table <- data.frame(
+	metric = c(
+		"Rows with at least one missing value",
+		"Rows with gross value 0 (domestic or worldwide)",
+		"Overlap (missing and gross = 0)",
+		"Rows removed (missing or gross = 0)",
+		"Rows removed (ignoring missing mpaa_rating)"
+	),
+	count = c(
+		sum(row_has_missing),
+		sum(gross_is_zero),
+		overlap_count,
+		remove_all_count,
+		remove_no_rating_count
+	),
+	percent = c(
+		round(100 * sum(row_has_missing) / total_movies, 2),
+		round(100 * sum(gross_is_zero) / total_movies, 2),
+		round(100 * overlap_count / total_movies, 2),
+		remove_all_pct,
+		remove_no_rating_pct
+	)
+)
+
+knitr::kable(impact_table, caption = "Impact of filtering rules")
 ```
 
 ## Remove rows with missing values (except rating) and gross = 0
@@ -155,7 +194,281 @@ gross_is_zero <-
 
 movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
 
-cat("Rows before cleaning:", nrow(movie_profit), "\n")
-cat("Rows after cleaning:", nrow(movie_profit_clean), "\n")
-cat("Rows removed:", nrow(movie_profit) - nrow(movie_profit_clean), "\n\n")
+cleaning_table <- data.frame(
+	metric = c("Rows before cleaning", "Rows after cleaning", "Rows removed"),
+	count = c(nrow(movie_profit), nrow(movie_profit_clean), nrow(movie_profit) - nrow(movie_profit_clean))
+)
+
+knitr::kable(cleaning_table, caption = "Cleaning summary")
+```
+
+## Create new derived columns
+
+```{r}
+movie_profit_enriched <- movie_profit_clean
+
+# International gross is the non-domestic part of worldwide gross
+movie_profit_enriched$international_gross <- movie_profit_enriched$worldwide_gross - movie_profit_enriched$domestic_gross
+
+# ROI factors (gross divided by production budget)
+movie_profit_enriched$roi_domestic_factor <- with(
+	movie_profit_enriched,
+	ifelse(production_budget > 0, domestic_gross / production_budget, NA_real_)
+)
+
+movie_profit_enriched$roi_worldwide_factor <- with(
+	movie_profit_enriched,
+	ifelse(production_budget > 0, worldwide_gross / production_budget, NA_real_)
+)
+
+# Top-100 flags
+rank_domestic <- rank(-movie_profit_enriched$domestic_gross, ties.method = "first")
+rank_international <- rank(-movie_profit_enriched$international_gross, ties.method = "first")
+
+movie_profit_enriched$top100_domestic_gross <- rank_domestic <= 100
+movie_profit_enriched$top100_international_gross <- rank_international <= 100
+
+new_columns_preview <- movie_profit_enriched[, c(
+	"movie",
+	"production_budget",
+	"domestic_gross",
+	"worldwide_gross",
+	"international_gross",
+	"roi_domestic_factor",
+	"roi_worldwide_factor",
+	"top100_domestic_gross",
+	"top100_international_gross"
+)]
+
+knitr::kable(head(new_columns_preview, 5), caption = "Preview of new derived columns")
+```
+
+## Basic descriptive statistics
+
+```{r}
+analysis_data <- movie_profit_enriched
+
+numeric_vars <- names(analysis_data)[sapply(analysis_data, is.numeric)]
+# Exclude row ID from numeric summaries
+numeric_vars <- setdiff(numeric_vars, "X")
+
+# Focus categorical summaries on meaningful analysis columns
+categorical_vars <- intersect(c("genre", "mpaa_rating", "distributor"), names(analysis_data))
+
+release_dates <- as.Date(analysis_data$release_date, format = "%m/%d/%Y")
+profile_table <- data.frame(
+	metric = c(
+		"Rows",
+		"Columns",
+		"Numeric variables",
+		"Categorical variables",
+		"Unique movies",
+		"Valid release dates",
+		"Release year range"
+	),
+	value = c(
+		nrow(analysis_data),
+		ncol(analysis_data),
+		length(numeric_vars),
+		length(categorical_vars),
+		length(unique(analysis_data$movie)),
+		sum(!is.na(release_dates)),
+		paste(format(min(release_dates, na.rm = TRUE), "%Y"), "to", format(max(release_dates, na.rm = TRUE), "%Y"))
+	)
+)
+knitr::kable(profile_table, caption = "Analysis dataset profile")
+
+if (length(numeric_vars) > 0) {
+	num_summary_mat <- do.call(cbind, lapply(analysis_data[, numeric_vars, drop = FALSE], summary))
+	num_summary <- data.frame(
+		statistic = rownames(num_summary_mat),
+		num_summary_mat,
+		row.names = NULL,
+		check.names = FALSE
+	)
+
+	for (col in numeric_vars) {
+		num_summary[[col]] <- format(
+			round(as.numeric(num_summary[[col]]), 2),
+			big.mark = ",",
+			scientific = FALSE,
+			trim = TRUE
+		)
+	}
+
+	print(knitr::kable(num_summary, caption = "Numeric summary"))
+
+	mean_median_table <- data.frame(
+		variable = numeric_vars,
+		mean = round(sapply(analysis_data[, numeric_vars, drop = FALSE], mean, na.rm = TRUE), 2),
+		median = round(sapply(analysis_data[, numeric_vars, drop = FALSE], median, na.rm = TRUE), 2),
+		row.names = NULL
+	)
+	mean_median_table$mean <- format(mean_median_table$mean, big.mark = ",", scientific = FALSE, trim = TRUE)
+	mean_median_table$median <- format(mean_median_table$median, big.mark = ",", scientific = FALSE, trim = TRUE)
+	print(knitr::kable(mean_median_table, caption = "Mean and median by numeric variable"))
+
+	sd_table <- data.frame(
+		variable = numeric_vars,
+		sd = round(sapply(analysis_data[, numeric_vars, drop = FALSE], sd, na.rm = TRUE), 2),
+		row.names = NULL
+	)
+	sd_table$sd <- format(sd_table$sd, big.mark = ",", scientific = FALSE, trim = TRUE)
+	print(knitr::kable(sd_table, caption = "Standard deviation by variable"))
+
+	outlier_stats <- do.call(rbind, lapply(numeric_vars, function(v) {
+		x <- analysis_data[[v]]
+		q1 <- quantile(x, 0.25, na.rm = TRUE)
+		q3 <- quantile(x, 0.75, na.rm = TRUE)
+		iqr_val <- q3 - q1
+		lower <- q1 - 1.5 * iqr_val
+		upper <- q3 + 1.5 * iqr_val
+		low_outlier <- x < lower
+		high_outlier <- x > upper
+		is_outlier <- low_outlier | high_outlier
+
+		data.frame(
+			variable = v,
+			outlier_count = sum(is_outlier, na.rm = TRUE),
+			outlier_percent = round(100 * sum(is_outlier, na.rm = TRUE) / sum(!is.na(x)), 2),
+			low_outlier_count = sum(low_outlier, na.rm = TRUE),
+			high_outlier_count = sum(high_outlier, na.rm = TRUE)
+		)
+	}))
+
+	print(knitr::kable(outlier_stats, caption = "IQR outlier summary"))
+}
+
+
+if (length(categorical_vars) > 0) {
+	cat("\nCategorical variable details:\n")
+	cat_table <- do.call(rbind, lapply(categorical_vars, function(v) {
+		x <- analysis_data[[v]]
+		x_non_missing <- x[!(is.na(x) | trimws(x) == "")]
+		tab <- sort(table(x_non_missing), decreasing = TRUE)
+		data.frame(
+			variable = v,
+			unique_levels = length(unique(x_non_missing)),
+			most_common = names(tab)[1],
+			most_common_count = as.integer(tab[1])
+		)
+	}))
+	print(knitr::kable(cat_table, caption = "Categorical variable summary"))
+}
+```
+
+## Simple distributions
+
+```{r, include=FALSE}
+analysis_data <- if (exists("movie_profit_clean")) movie_profit_clean else movie_profit
+```
+
+```{r}
+if ("production_budget" %in% names(analysis_data)) {
+	hist(analysis_data$production_budget,
+		main = "Production Budget Distribution",
+		xlab = "Production Budget",
+		col = "lightblue",
+		border = "white"
+	)
+}
+```
+
+```{r}
+if ("domestic_gross" %in% names(analysis_data)) {
+	hist(analysis_data$domestic_gross,
+		main = "Domestic Gross Distribution",
+		xlab = "Domestic Gross",
+		col = "lightgreen",
+		border = "white"
+	)
+}
+```
+
+```{r}
+if ("worldwide_gross" %in% names(analysis_data)) {
+	hist(analysis_data$worldwide_gross,
+		main = "Worldwide Gross Distribution",
+		xlab = "Worldwide Gross",
+		col = "lightpink",
+		border = "white"
+	)
+}
+```
+
+```{r}
+if (all(c("production_budget", "domestic_gross", "worldwide_gross") %in% names(analysis_data))) {
+	boxplot(
+		analysis_data$production_budget,
+		analysis_data$domestic_gross,
+		analysis_data$worldwide_gross,
+		names = c("Budget", "Domestic", "Worldwide"),
+		main = "Boxplots for Key Numeric Variables",
+		col = c("lightblue", "lightgreen", "lightpink")
+	)
+}
+```
+
+```{r}
+if ("genre" %in% names(analysis_data)) {
+	genre_tab <- sort(table(analysis_data$genre), decreasing = TRUE)
+	top_n <- min(10, length(genre_tab))
+	barplot(
+		genre_tab[1:top_n],
+		las = 2,
+		col = "tan",
+		main = "Top Genres",
+		ylab = "Number of Movies"
+	)
+}
+```
+
+```{r}
+if ("mpaa_rating" %in% names(analysis_data)) {
+	rating_tab <- sort(table(analysis_data$mpaa_rating), decreasing = TRUE)
+	barplot(
+		rating_tab,
+		col = "skyblue",
+		main = "MPAA Rating Distribution",
+		ylab = "Number of Movies"
+	)
+}
+```
+
+```{r}
+if ("release_date" %in% names(analysis_data)) {
+	release_dates <- as.Date(analysis_data$release_date, format = "%m/%d/%Y")
+	valid_release_dates <- !is.na(release_dates)
+	release_year <- as.integer(format(release_dates[valid_release_dates], "%Y"))
+	year_tab <- table(release_year)
+	year_tab <- year_tab[order(as.integer(names(year_tab)))]
+	if (length(year_tab) > 0) {
+		barplot(
+			as.integer(year_tab),
+			names.arg = names(year_tab),
+			col = "darkorange",
+			border = "white",
+			las = 2,
+			cex.names = 0.7,
+			xlab = "Release Year",
+			ylab = "Number of Movies",
+			main = "Movies Released Per Year"
+		)
+	}
+}
+```
+
+```{r}
+if ("distributor" %in% names(analysis_data)) {
+	distributor_tab <- sort(table(analysis_data$distributor), decreasing = TRUE)
+	top_n <- min(10, length(distributor_tab))
+	barplot(
+		distributor_tab[1:top_n],
+		las = 2,
+		cex.names = 0.8,
+		col = "cornflowerblue",
+		main = "Top 10 Distributors",
+		ylab = "Number of Movies"
+	)
+}
 ```
