@@ -52,6 +52,24 @@ variable_overview <- data.frame(
 knitr::kable(variable_overview, caption = "Variable types and first 5 values")
 ```
 
+## Convert release_date to Date type and check conversion results
+
+```{r}
+release_date_raw <- movie_profit$release_date
+movie_profit$release_date <- as.Date(release_date_raw, format = "%m/%d/%Y")
+
+conversion_table <- data.frame(
+	metric = c("Original type", "New type", "Invalid dates after conversion"),
+	value = c(
+		class(release_date_raw)[1],
+		class(movie_profit$release_date)[1],
+		sum(is.na(movie_profit$release_date) & !is.na(release_date_raw) & trimws(release_date_raw) != "")
+	)
+)
+
+knitr::kable(conversion_table, caption = "release_date conversion summary")
+```
+
 ## Check for missing values, duplicates, and logical consistency
 
 ```{r}
@@ -101,16 +119,11 @@ if (all(c("domestic_gross", "worldwide_gross") %in% names(movie_profit))) {
 }
 
 # Date parsing check
-bad_date_count <- NA
-if ("release_date" %in% names(movie_profit)) {
-	parsed_dates <- as.Date(movie_profit$release_date, format = "%m/%d/%Y")
-	bad_date_rows <- which(
-		is.na(parsed_dates) &
-			!is.na(movie_profit$release_date) &
-			trimws(movie_profit$release_date) != ""
-	)
-	bad_date_count <- length(bad_date_rows)
-}
+bad_date_count <- sum(
+	is.na(movie_profit$release_date) &
+		!is.na(release_date_raw) &
+		trimws(release_date_raw) != ""
+)
 
 knitr::kable(missing_summary, caption = "Missing values by variable")
 
@@ -203,6 +216,12 @@ knitr::kable(cleaning_table, caption = "Cleaning summary")
 ```
 
 ## Create new derived columns
+New columns:
+- International Gross (numerical)
+- ROI domestic (numerical)
+- ROI worldwide (numerical)
+- Top-100 domestic gross flag (boolean)
+- Top-100 international gross flag (boolean)
 
 ```{r}
 movie_profit_enriched <- movie_profit_clean
@@ -255,7 +274,7 @@ numeric_vars <- setdiff(numeric_vars, "X")
 # Focus categorical summaries on meaningful analysis columns
 categorical_vars <- intersect(c("genre", "mpaa_rating", "distributor"), names(analysis_data))
 
-release_dates <- as.Date(analysis_data$release_date, format = "%m/%d/%Y")
+release_dates <- analysis_data$release_date
 profile_table <- data.frame(
 	metric = c(
 		"Rows",
@@ -272,8 +291,8 @@ profile_table <- data.frame(
 		length(numeric_vars),
 		length(categorical_vars),
 		length(unique(analysis_data$movie)),
-		sum(!is.na(release_dates)),
-		paste(format(min(release_dates, na.rm = TRUE), "%Y"), "to", format(max(release_dates, na.rm = TRUE), "%Y"))
+		length(release_dates),
+		paste(format(min(release_dates), "%Y"), "to", format(max(release_dates), "%Y"))
 	)
 )
 knitr::kable(profile_table, caption = "Analysis dataset profile")
@@ -436,25 +455,22 @@ if ("mpaa_rating" %in% names(analysis_data)) {
 ```
 
 ```{r}
-if ("release_date" %in% names(analysis_data)) {
-	release_dates <- as.Date(analysis_data$release_date, format = "%m/%d/%Y")
-	valid_release_dates <- !is.na(release_dates)
-	release_year <- as.integer(format(release_dates[valid_release_dates], "%Y"))
-	year_tab <- table(release_year)
-	year_tab <- year_tab[order(as.integer(names(year_tab)))]
-	if (length(year_tab) > 0) {
-		barplot(
-			as.integer(year_tab),
-			names.arg = names(year_tab),
-			col = "darkorange",
-			border = "white",
-			las = 2,
-			cex.names = 0.7,
-			xlab = "Release Year",
-			ylab = "Number of Movies",
-			main = "Movies Released Per Year"
-		)
-	}
+release_dates <- analysis_data$release_date
+release_year <- as.integer(format(release_dates, "%Y"))
+year_tab <- table(release_year)
+year_tab <- year_tab[order(as.integer(names(year_tab)))]
+if (length(year_tab) > 0) {
+	barplot(
+		as.integer(year_tab),
+		names.arg = names(year_tab),
+		col = "darkorange",
+		border = "white",
+		las = 2,
+		cex.names = 0.7,
+		xlab = "Release Year",
+		ylab = "Number of Movies",
+		main = "Movies Released Per Year"
+	)
 }
 ```
 
