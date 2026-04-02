@@ -222,6 +222,7 @@ New columns:
 - ROI worldwide (numerical)
 - Top-100 domestic gross flag (boolean)
 - Top-100 international gross flag (boolean)
+- Is Horror Movie (logical flag)
 
 ```{r}
 movie_profit_enriched <- movie_profit_clean
@@ -247,6 +248,10 @@ rank_international <- rank(-movie_profit_enriched$international_gross, ties.meth
 movie_profit_enriched$top100_domestic_gross <- rank_domestic <= 100
 movie_profit_enriched$top100_international_gross <- rank_international <= 100
 
+# Logical flag for horror movies based on genre text
+movie_profit_enriched$is_horror_movie <-
+	grepl("horror", movie_profit_enriched$genre, ignore.case = TRUE)
+
 new_columns_preview <- movie_profit_enriched[, c(
 	"movie",
 	"production_budget",
@@ -256,7 +261,8 @@ new_columns_preview <- movie_profit_enriched[, c(
 	"roi_domestic_factor",
 	"roi_worldwide_factor",
 	"top100_domestic_gross",
-	"top100_international_gross"
+	"top100_international_gross",
+	"is_horror_movie"
 )]
 
 knitr::kable(head(new_columns_preview, 5), caption = "Preview of new derived columns")
@@ -383,52 +389,6 @@ analysis_data <- if (exists("movie_profit_clean")) movie_profit_clean else movie
 ```
 
 ```{r}
-if ("production_budget" %in% names(analysis_data)) {
-	hist(analysis_data$production_budget,
-		main = "Production Budget Distribution",
-		xlab = "Production Budget",
-		col = "lightblue",
-		border = "white"
-	)
-}
-```
-
-```{r}
-if ("domestic_gross" %in% names(analysis_data)) {
-	hist(analysis_data$domestic_gross,
-		main = "Domestic Gross Distribution",
-		xlab = "Domestic Gross",
-		col = "lightgreen",
-		border = "white"
-	)
-}
-```
-
-```{r}
-if ("worldwide_gross" %in% names(analysis_data)) {
-	hist(analysis_data$worldwide_gross,
-		main = "Worldwide Gross Distribution",
-		xlab = "Worldwide Gross",
-		col = "lightpink",
-		border = "white"
-	)
-}
-```
-
-```{r}
-if (all(c("production_budget", "domestic_gross", "worldwide_gross") %in% names(analysis_data))) {
-	boxplot(
-		analysis_data$production_budget,
-		analysis_data$domestic_gross,
-		analysis_data$worldwide_gross,
-		names = c("Budget", "Domestic", "Worldwide"),
-		main = "Boxplots for Key Numeric Variables",
-		col = c("lightblue", "lightgreen", "lightpink")
-	)
-}
-```
-
-```{r}
 if ("genre" %in% names(analysis_data)) {
 	genre_tab <- sort(table(analysis_data$genre), decreasing = TRUE)
 	top_n <- min(10, length(genre_tab))
@@ -488,3 +448,241 @@ if ("distributor" %in% names(analysis_data)) {
 	)
 }
 ```
+
+## Horror vs non-horror comparison
+
+```{r}
+compare_data <- movie_profit_enriched
+
+compare_data$movie_type <- ifelse(compare_data$is_horror_movie, "Horror", "Non-horror")
+
+count_iqr_outliers <- function(x) {
+	x <- x[!is.na(x)]
+	if (length(x) < 4) {
+		return(0)
+	}
+	q1 <- quantile(x, 0.25, na.rm = TRUE)
+	q3 <- quantile(x, 0.75, na.rm = TRUE)
+	iqr_val <- q3 - q1
+	lower <- q1 - 1.5 * iqr_val
+	upper <- q3 + 1.5 * iqr_val
+	sum(x < lower | x > upper)
+}
+
+summary_table <- data.frame(
+	metric = c(
+		"movie_count",
+		"budget_mean",
+		"budget_q1",
+		"budget_median",
+		"budget_q3",
+		"worldwide_mean",
+		"worldwide_q1",
+		"worldwide_median",
+		"worldwide_q3",
+		"roi_domestic_mean",
+		"roi_domestic_q1",
+		"roi_domestic_median",
+		"roi_domestic_q3",
+		"roi_domestic_outlier_count",
+		"roi_worldwide_mean",
+		"roi_worldwide_q1",
+		"roi_worldwide_median",
+		"roi_worldwide_q3",
+		"roi_worldwide_outlier_count"
+	),
+	Horror = c(
+		sum(compare_data$is_horror_movie),
+		round(mean(compare_data$production_budget[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$production_budget[compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$production_budget[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$production_budget[compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		round(mean(compare_data$worldwide_gross[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$worldwide_gross[compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$worldwide_gross[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$worldwide_gross[compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		round(mean(compare_data$roi_domestic_factor[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_domestic_factor[compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$roi_domestic_factor[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_domestic_factor[compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		count_iqr_outliers(compare_data$roi_domestic_factor[compare_data$is_horror_movie]),
+		round(mean(compare_data$roi_worldwide_factor[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_worldwide_factor[compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$roi_worldwide_factor[compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_worldwide_factor[compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		count_iqr_outliers(compare_data$roi_worldwide_factor[compare_data$is_horror_movie])
+	),
+	`Non-horror` = c(
+		sum(!compare_data$is_horror_movie),
+		round(mean(compare_data$production_budget[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$production_budget[!compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$production_budget[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$production_budget[!compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		round(mean(compare_data$worldwide_gross[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$worldwide_gross[!compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$worldwide_gross[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$worldwide_gross[!compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		round(mean(compare_data$roi_domestic_factor[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_domestic_factor[!compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$roi_domestic_factor[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_domestic_factor[!compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		count_iqr_outliers(compare_data$roi_domestic_factor[!compare_data$is_horror_movie]),
+		round(mean(compare_data$roi_worldwide_factor[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_worldwide_factor[!compare_data$is_horror_movie], 0.25, na.rm = TRUE), 2),
+		round(median(compare_data$roi_worldwide_factor[!compare_data$is_horror_movie], na.rm = TRUE), 2),
+		round(quantile(compare_data$roi_worldwide_factor[!compare_data$is_horror_movie], 0.75, na.rm = TRUE), 2),
+		count_iqr_outliers(compare_data$roi_worldwide_factor[!compare_data$is_horror_movie])
+	),
+	check.names = FALSE
+)
+
+numeric_cols <- setdiff(names(summary_table), "metric")
+for (col in numeric_cols) {
+	summary_table[[col]] <- format(summary_table[[col]], big.mark = ",", scientific = FALSE, trim = TRUE)
+}
+
+knitr::kable(summary_table, caption = "Horror vs non-horror basic metrics")
+```
+
+## Horror vs non-horror movies over time
+
+```{r}
+year_vals <- as.integer(format(compare_data$release_date, "%Y"))
+year_range <- range(year_vals, na.rm = TRUE)
+
+horror_year_tab <- table(year_vals[compare_data$is_horror_movie])
+horror_year_tab <- horror_year_tab[order(as.integer(names(horror_year_tab)))]
+
+if (length(horror_year_tab) > 0) {
+	plot(
+		as.integer(names(horror_year_tab)),
+		as.integer(horror_year_tab),
+		type = "l",
+		lwd = 2,
+		col = "firebrick",
+		xlim = year_range,
+		xlab = "Release Year",
+		ylab = "Number of Horror Movies",
+		main = "Horror Movies per Year"
+	)
+}
+```
+
+```{r}
+year_vals <- as.integer(format(compare_data$release_date, "%Y"))
+
+non_horror_year_tab <- table(year_vals[!compare_data$is_horror_movie])
+non_horror_year_tab <- non_horror_year_tab[order(as.integer(names(non_horror_year_tab)))]
+
+if (length(non_horror_year_tab) > 0) {
+	plot(
+		as.integer(names(non_horror_year_tab)),
+		as.integer(non_horror_year_tab),
+		type = "l",
+		lwd = 2,
+		col = "steelblue",
+		xlim = year_range,
+		xlab = "Release Year",
+		ylab = "Number of Non-horror Movies",
+		main = "Non-horror Movies per Year"
+	)
+}
+```
+
+## Average ROI by year: horror vs non-horror
+
+```{r}
+year_vals <- as.integer(format(compare_data$release_date, "%Y"))
+roi_vals <- compare_data$roi_worldwide_factor
+
+valid_rows <- !is.na(year_vals) & !is.na(roi_vals)
+all_years <- sort(unique(year_vals[valid_rows]))
+all_years <- all_years[all_years >= 1975]
+
+horror_roi_by_year <- tapply(
+	roi_vals[valid_rows & compare_data$is_horror_movie],
+	year_vals[valid_rows & compare_data$is_horror_movie],
+	mean
+)
+
+non_horror_roi_by_year <- tapply(
+	roi_vals[valid_rows & !compare_data$is_horror_movie],
+	year_vals[valid_rows & !compare_data$is_horror_movie],
+	mean
+)
+
+horror_series <- as.numeric(horror_roi_by_year[as.character(all_years)])
+non_horror_series <- as.numeric(non_horror_roi_by_year[as.character(all_years)])
+
+if (length(all_years) > 0) {
+	plot(
+		all_years,
+		horror_series,
+		type = "l",
+		lwd = 2,
+		col = "firebrick",
+		xlab = "Release Year",
+		ylab = "Average ROI (Worldwide)",
+		main = "Average ROI per Year: Horror vs Non-horror",
+		ylim = range(c(horror_series, non_horror_series), na.rm = TRUE)
+	)
+
+	lines(all_years, non_horror_series, lwd = 2, col = "steelblue")
+	legend("topright",
+		legend = c("Horror", "Non-horror"),
+		col = c("firebrick", "steelblue"),
+		lwd = 2,
+		bty = "n"
+	)
+}
+```
+
+
+## Median ROI by year: horror vs non-horror
+
+```{r}
+year_vals <- as.integer(format(compare_data$release_date, "%Y"))
+roi_vals <- compare_data$roi_worldwide_factor
+
+valid_rows <- !is.na(year_vals) & !is.na(roi_vals)
+all_years <- sort(unique(year_vals[valid_rows]))
+all_years <- all_years[all_years >= 1975]
+
+horror_roi_by_year <- tapply(
+	roi_vals[valid_rows & compare_data$is_horror_movie],
+	year_vals[valid_rows & compare_data$is_horror_movie],
+	median
+)
+
+non_horror_roi_by_year <- tapply(
+	roi_vals[valid_rows & !compare_data$is_horror_movie],
+	year_vals[valid_rows & !compare_data$is_horror_movie],
+	median
+)
+
+horror_series <- as.numeric(horror_roi_by_year[as.character(all_years)])
+non_horror_series <- as.numeric(non_horror_roi_by_year[as.character(all_years)])
+
+if (length(all_years) > 0) {
+	plot(
+		all_years,
+		horror_series,
+		type = "l",
+		lwd = 2,
+		col = "firebrick",
+		xlab = "Release Year",
+		ylab = "Median ROI (Worldwide)",
+		main = "Median ROI per Year: Horror vs Non-horror",
+		ylim = range(c(horror_series, non_horror_series), na.rm = TRUE)
+	)
+
+	lines(all_years, non_horror_series, lwd = 2, col = "steelblue")
+	legend("topright",
+		legend = c("Horror", "Non-horror"),
+		col = c("firebrick", "steelblue"),
+		lwd = 2,
+		bty = "n"
+	)
+}
+```
+
