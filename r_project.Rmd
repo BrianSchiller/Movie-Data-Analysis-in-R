@@ -21,6 +21,10 @@ knitr::opts_chunk$set(
 ## Load and verify the data
 
 ```{r}
+if (!requireNamespace("DT", quietly = TRUE)) {
+	stop("Package 'DT' is required. Install it once with: install.packages('DT', repos = 'https://cloud.r-project.org')")
+}
+
 movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
 
 overview_table <- data.frame(
@@ -338,7 +342,7 @@ if (length(numeric_vars) > 0) {
 		sd = round(sapply(analysis_data[, numeric_vars, drop = FALSE], sd, na.rm = TRUE), 2),
 		row.names = NULL
 	)
-	sd_table$sd <- format(sd_table$sd, big.mark = ",", scientific = FALSE, trim = TRUE)
+ sd_table$sd <- format(sd_table$sd, big.mark = ",", scientific = FALSE, trim = TRUE)
 	print(knitr::kable(sd_table, caption = "Standard deviation by variable"))
 
 	outlier_stats <- do.call(rbind, lapply(numeric_vars, function(v) {
@@ -548,9 +552,10 @@ knitr::kable(summary_table, caption = "Horror vs non-horror basic metrics")
 
 ```{r}
 year_vals <- as.integer(format(compare_data$release_date, "%Y"))
-year_range <- range(year_vals, na.rm = TRUE)
+valid_rows <- !is.na(year_vals) & year_vals >= 1975
+year_range <- range(year_vals[valid_rows], na.rm = TRUE)
 
-horror_year_tab <- table(year_vals[compare_data$is_horror_movie])
+horror_year_tab <- table(year_vals[valid_rows & compare_data$is_horror_movie])
 horror_year_tab <- horror_year_tab[order(as.integer(names(horror_year_tab)))]
 
 if (length(horror_year_tab) > 0) {
@@ -570,8 +575,10 @@ if (length(horror_year_tab) > 0) {
 
 ```{r}
 year_vals <- as.integer(format(compare_data$release_date, "%Y"))
+valid_rows <- !is.na(year_vals) & year_vals >= 1975
+year_range <- range(year_vals[valid_rows], na.rm = TRUE)
 
-non_horror_year_tab <- table(year_vals[!compare_data$is_horror_movie])
+non_horror_year_tab <- table(year_vals[valid_rows & !compare_data$is_horror_movie])
 non_horror_year_tab <- non_horror_year_tab[order(as.integer(names(non_horror_year_tab)))]
 
 if (length(non_horror_year_tab) > 0) {
@@ -615,25 +622,77 @@ horror_series <- as.numeric(horror_roi_by_year[as.character(all_years)])
 non_horror_series <- as.numeric(non_horror_roi_by_year[as.character(all_years)])
 
 if (length(all_years) > 0) {
+	y_cap <- 20
+	horror_plot_series <- pmin(horror_series, y_cap)
+	non_horror_plot_series <- pmin(non_horror_series, y_cap)
+
+	horror_outlier_idx <- which(!is.na(horror_series) & horror_series > y_cap)
+	non_horror_outlier_idx <- which(!is.na(non_horror_series) & non_horror_series > y_cap)
+
 	plot(
 		all_years,
-		horror_series,
+		horror_plot_series,
 		type = "l",
 		lwd = 2,
 		col = "firebrick",
 		xlab = "Release Year",
 		ylab = "Average ROI (Worldwide)",
-		main = "Average ROI per Year: Horror vs Non-horror",
-		ylim = range(c(horror_series, non_horror_series), na.rm = TRUE)
+		main = "Average ROI per Year: Horror vs Non-horror (capped at 20)",
+		ylim = c(0, y_cap)
 	)
 
-	lines(all_years, non_horror_series, lwd = 2, col = "steelblue")
+	lines(all_years, non_horror_plot_series, lwd = 2, col = "steelblue")
+
+	if (length(horror_outlier_idx) > 0) {
+		points(all_years[horror_outlier_idx], rep(y_cap, length(horror_outlier_idx)),
+			pch = 24, bg = "firebrick", col = "firebrick", cex = 0.8)
+	}
+
+	if (length(non_horror_outlier_idx) > 0) {
+		points(all_years[non_horror_outlier_idx], rep(y_cap, length(non_horror_outlier_idx)),
+			pch = 24, bg = "steelblue", col = "steelblue", cex = 0.8)
+	}
+
 	legend("topright",
-		legend = c("Horror", "Non-horror"),
-		col = c("firebrick", "steelblue"),
-		lwd = 2,
+		legend = c("Horror", "Non-horror", paste0("Capped value (> ", y_cap, ")")),
+		col = c("firebrick", "steelblue", "black"),
+		lwd = c(2, 2, NA),
+		pch = c(NA, NA, 24),
+		pt.bg = c(NA, NA, "gray60"),
 		bty = "n"
 	)
+
+	horror_outlier_note <- if (length(horror_outlier_idx) > 0) {
+		paste(
+			paste0(
+				all_years[horror_outlier_idx],
+				" (",
+				round(horror_series[horror_outlier_idx], 2),
+				"x)"
+			),
+			collapse = ", "
+		)
+	} else {
+		"none"
+	}
+
+	non_horror_outlier_note <- if (length(non_horror_outlier_idx) > 0) {
+		paste(
+			paste0(
+				all_years[non_horror_outlier_idx],
+				" (",
+				round(non_horror_series[non_horror_outlier_idx], 2),
+				"x)"
+			),
+			collapse = ", "
+		)
+	} else {
+		"none"
+	}
+
+	cat(paste0("Outlier years (mean ROI > ", y_cap, "):\n"))
+	cat("- Horror:", horror_outlier_note, "\n")
+	cat("- Non-horror:", non_horror_outlier_note, "\n")
 }
 ```
 
@@ -664,25 +723,164 @@ horror_series <- as.numeric(horror_roi_by_year[as.character(all_years)])
 non_horror_series <- as.numeric(non_horror_roi_by_year[as.character(all_years)])
 
 if (length(all_years) > 0) {
+	y_cap <- 20
+	horror_plot_series <- pmin(horror_series, y_cap)
+	non_horror_plot_series <- pmin(non_horror_series, y_cap)
+
+	horror_outlier_idx <- which(!is.na(horror_series) & horror_series > y_cap)
+	non_horror_outlier_idx <- which(!is.na(non_horror_series) & non_horror_series > y_cap)
+
 	plot(
 		all_years,
-		horror_series,
+		horror_plot_series,
 		type = "l",
 		lwd = 2,
 		col = "firebrick",
 		xlab = "Release Year",
 		ylab = "Median ROI (Worldwide)",
-		main = "Median ROI per Year: Horror vs Non-horror",
-		ylim = range(c(horror_series, non_horror_series), na.rm = TRUE)
+		main = "Median ROI per Year: Horror vs Non-horror (capped at 20)",
+		ylim = c(0, y_cap)
 	)
 
-	lines(all_years, non_horror_series, lwd = 2, col = "steelblue")
+	lines(all_years, non_horror_plot_series, lwd = 2, col = "steelblue")
+
+	if (length(horror_outlier_idx) > 0) {
+		points(all_years[horror_outlier_idx], rep(y_cap, length(horror_outlier_idx)),
+			pch = 24, bg = "firebrick", col = "firebrick", cex = 0.8)
+	}
+
+	if (length(non_horror_outlier_idx) > 0) {
+		points(all_years[non_horror_outlier_idx], rep(y_cap, length(non_horror_outlier_idx)),
+			pch = 24, bg = "steelblue", col = "steelblue", cex = 0.8)
+	}
+
 	legend("topright",
-		legend = c("Horror", "Non-horror"),
-		col = c("firebrick", "steelblue"),
-		lwd = 2,
+		legend = c("Horror", "Non-horror", paste0("Capped value (> ", y_cap, ")")),
+		col = c("firebrick", "steelblue", "black"),
+		lwd = c(2, 2, NA),
+		pch = c(NA, NA, 24),
+		pt.bg = c(NA, NA, "gray60"),
 		bty = "n"
 	)
+
+	horror_outlier_note <- if (length(horror_outlier_idx) > 0) {
+		paste(
+			paste0(
+				all_years[horror_outlier_idx],
+				" (",
+				round(horror_series[horror_outlier_idx], 2),
+				"x)"
+			),
+			collapse = ", "
+		)
+	} else {
+		"none"
+	}
+
+	non_horror_outlier_note <- if (length(non_horror_outlier_idx) > 0) {
+		paste(
+			paste0(
+				all_years[non_horror_outlier_idx],
+				" (",
+				round(non_horror_series[non_horror_outlier_idx], 2),
+				"x)"
+			),
+			collapse = ", "
+		)
+	} else {
+		"none"
+	}
+
+	cat(paste0("Outlier years (median ROI > ", y_cap, "):\n"))
+	cat("- Horror:", horror_outlier_note, "\n")
+	cat("- Non-horror:", non_horror_outlier_note, "\n")
 }
 ```
+
+## Interactive movie table (filter + sort)
+
+```{r}
+table_data <- if (exists("movie_profit_enriched")) movie_profit_enriched else movie_profit
+
+interactive_table <- table_data
+
+if (!"roi_worldwide_factor" %in% names(interactive_table)) {
+	interactive_table$roi_worldwide_factor <- with(
+		interactive_table,
+		ifelse(production_budget > 0, worldwide_gross / production_budget, NA_real_)
+	)
+}
+
+# Keep numeric values numeric so sorting remains correct in DT.
+interactive_table$production_budget_k <- interactive_table$production_budget / 1000
+interactive_table$domestic_gross_k <- interactive_table$domestic_gross / 1000
+interactive_table$worldwide_gross_k <- interactive_table$worldwide_gross / 1000
+
+interactive_table$release_date_fmt <- ifelse(
+	is.na(interactive_table$release_date),
+	NA_character_,
+	format(interactive_table$release_date, "%Y-%m-%d")
+)
+
+display_table <- interactive_table[, c(
+	"movie",
+	"genre",
+	"roi_worldwide_factor",
+	"production_budget_k",
+	"domestic_gross_k",
+	"worldwide_gross_k",
+	"release_date_fmt",
+	"mpaa_rating",
+	"distributor"
+)]
+
+names(display_table) <- c(
+	"Movie",
+	"Genre",
+	"ROI (x)",
+	"Production Cost (x1000 $)",
+	"Domestic Gross (x1000 $)",
+	"Worldwide Gross (x1000 $)",
+	"Release Date",
+	"MPAA Rating",
+	"Distributor"
+)
+
+display_table$`ROI (x)` <- round(display_table$`ROI (x)`, 2)
+display_table$`Production Cost (x1000 $)` <- round(display_table$`Production Cost (x1000 $)`, 1)
+display_table$`Domestic Gross (x1000 $)` <- round(display_table$`Domestic Gross (x1000 $)`, 1)
+display_table$`Worldwide Gross (x1000 $)` <- round(display_table$`Worldwide Gross (x1000 $)`, 1)
+
+DT::datatable(
+	display_table,
+	rownames = FALSE,
+	options = list(
+		pageLength = 15,
+		lengthMenu = c(10, 15, 25, 50),
+		order = list(list(5, "desc")),
+		autoWidth = TRUE
+	),
+	callback = DT::JS(
+		"var genreColumn = 1;",
+		"var wrapper = $(table.table().container());",
+		"var controls = $('<div style=\"margin-bottom: 8px;\"></div>');",
+		"var label = $('<label style=\"margin-right: 8px; font-weight: 600;\">Genre:</label>');",
+		"var select = $('<select style=\"padding: 2px 6px;\"><option value=\"\">All genres</option></select>');",
+		"select.on('change', function() {",
+		"  var val = $.fn.dataTable.util.escapeRegex($(this).val());",
+		"  table.column(genreColumn).search(val ? '^' + val + '$' : '', true, false).draw();",
+		"});",
+		"table.column(genreColumn).data().unique().sort().each(function(d) {",
+		"  if (d !== null && d !== undefined && d !== '') {",
+		"    select.append($('<option></option>').attr('value', d).text(d));",
+		"  }",
+		"});",
+		"controls.append(label).append(select);",
+		"wrapper.prepend(controls);"
+	),
+	caption = "Interactive movie table (filter by Genre in the header row; money columns are in thousands of dollars)"
+)
+```
+
+
 
