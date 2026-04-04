@@ -882,5 +882,8 @@ DT::datatable(
 )
 ```
 
-
-
+Some things we can learn from this table:
+- 5/10 movies with ROI > 100x are horror movies (including the top 2).
+- Except for some outliers (Exorcist 2 and The Shining), the earlierst horror movies (before 1982) all had a ROI > 10x, while the non-horror movies in that period had lower ROIs on average.
+- When sorting after the lowest production budget, we can see that Horror Movies are cheap to produce (20 movies cost <= $1M). For other Genres, the numbers are: Action (4), Adventure (2), Comedy (28), Drama (69).
+- When sorting for production budget, we can also see that the cheapest Horror movies (<= $1M) are the movies which end up having a ROI > 100x (5/20 movies), while most movies have a ROI of >= 8x (15/20 movies). At the same time, in other genres the cheapest movies have a way lower ROI on average, with Drama only reaching an ROI >= 5x in half of the movies with a production budget <= $1M.
