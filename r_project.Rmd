@@ -16,6 +16,22 @@ knitr::opts_chunk$set(
 	fig.height = 5,
 	out.width = "100%"
 )
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+genre_palette <- c(
+	Action = "#1f77b4",
+	Adventure = "#ff7f0e",
+	Comedy = "#2ca02c",
+	Drama = "#9467bd",
+	Horror = "#d62728"
+)
+
+genre_color <- function(genres) {
+	colors <- genre_palette[as.character(genres)]
+	colors[is.na(colors)] <- "#999999"
+	colors
+}
 ```
 
 ## Load and verify the data
@@ -882,8 +898,295 @@ DT::datatable(
 )
 ```
 
-Some things we can learn from this table:
-- 5/10 movies with ROI > 100x are horror movies (including the top 2).
-- Except for some outliers (Exorcist 2 and The Shining), the earlierst horror movies (before 1982) all had a ROI > 10x, while the non-horror movies in that period had lower ROIs on average.
-- When sorting after the lowest production budget, we can see that Horror Movies are cheap to produce (20 movies cost <= $1M). For other Genres, the numbers are: Action (4), Adventure (2), Comedy (28), Drama (69).
-- When sorting for production budget, we can also see that the cheapest Horror movies (<= $1M) are the movies which end up having a ROI > 100x (5/20 movies), while most movies have a ROI of >= 8x (15/20 movies). At the same time, in other genres the cheapest movies have a way lower ROI on average, with Drama only reaching an ROI >= 5x in half of the movies with a production budget <= $1M.
+## Some examples of what we can learn from the interactive table
+
+Horror demonstrates remarkable ROI efficiency in this dataset:
+
+**ROI Leadership:** Horror is significantly overrepresented at the top of the ROI rankings, with 5 of the top 10 films by ROI being horror titles (including #1 and #2)
+
+**Early Advantage:** Except for some outliers (Exorcist 2 and The Shining), the earlierst horror movies (before 1982) all had a ROI > 10x, while the non-horror movies in that period had lower ROIs on average.
+
+**Number of Low-Budget Movies:** When sorting after the lowest production budget, we can see that Horror Movies are cheap to produce (20 movies cost <= $1M). For other Genres, the numbers are: Action (4), Adventure (2), Comedy (28), Drama (69).
+
+**Low Risk, High Reward::** When sorting for production budget, we can also see that the cheapest Horror movies (<= $1M) are the movies which end up having a ROI > 100x (5/20 movies), while most movies have a ROI of >= 8x (15/20 movies). At the same time, in other genres the cheapest movies have a way lower ROI on average, with Drama only reaching an ROI >= 5x in half of the movies with a production budget <= $1M.
+
+
+
+
+## Top 20 movies by ROI
+
+```{r}
+roi_plot_data <- compare_data[!is.na(compare_data$roi_worldwide_factor), ]
+roi_plot_data <- roi_plot_data[order(-roi_plot_data$roi_worldwide_factor), ]
+roi_plot_data <- head(roi_plot_data, 20)
+
+if (nrow(roi_plot_data) > 0) {
+	roi_plot_data <- roi_plot_data[order(roi_plot_data$roi_worldwide_factor), ]
+	roi_colors <- genre_color(roi_plot_data$genre)
+
+	par(mar = c(5, 12, 4, 2))
+	roi_bars <- barplot(
+		roi_plot_data$roi_worldwide_factor,
+		horiz = TRUE,
+		las = 1,
+		col = roi_colors,
+		border = "white",
+		xlab = "ROI (x)",
+		main = "Top 20 Movies by Worldwide ROI",
+		names.arg = roi_plot_data$movie,
+		cex.names = 0.65
+	)
+
+	text(
+		x = roi_plot_data$roi_worldwide_factor,
+		y = roi_bars,
+		labels = round(roi_plot_data$roi_worldwide_factor, 1),
+		pos = 4,
+		cex = 0.75
+	)
+
+	legend(
+		"bottomright",
+		legend = names(genre_palette),
+		fill = genre_palette,
+		bty = "n",
+		cex = 0.8
+	)
+}
+```
+
+## Earliest 50 movies per genre
+
+```{r, fig.width=14, fig.height=12}
+genres_to_plot <- intersect(names(genre_palette), unique(compare_data$genre))
+earliest_by_genre <- lapply(genres_to_plot, function(genre_name) {
+	genre_data <- compare_data[compare_data$genre == genre_name & !is.na(compare_data$release_date) & !is.na(compare_data$roi_worldwide_factor), ]
+	genre_data <- genre_data[order(genre_data$release_date), ]
+	head(genre_data, 50)
+})
+
+names(earliest_by_genre) <- genres_to_plot
+
+max_roi_early <- max(unlist(lapply(earliest_by_genre, function(x) x$roi_worldwide_factor)), na.rm = TRUE)
+if (is.finite(max_roi_early)) {
+	y_limit_early <- c(0, max_roi_early)
+} else {
+	y_limit_early <- c(0, 1)
+}
+
+old_par <- par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
+
+for (genre_name in names(earliest_by_genre)) {
+	genre_data <- earliest_by_genre[[genre_name]]
+	plot(
+		genre_data$release_date,
+		genre_data$roi_worldwide_factor,
+		pch = 16,
+		col = genre_palette[[genre_name]],
+		xlab = "Release Date",
+		ylab = "ROI (x)",
+		main = paste(genre_name, "- earliest 50"),
+		ylim = y_limit_early
+	)
+	abline(h = 1, lty = 3, col = "gray70")
+}
+
+if (length(genres_to_plot) < 6) {
+	for (i in seq_len(6 - length(genres_to_plot))) {
+		plot.new()
+	}
+}
+
+par(old_par)
+```
+
+## Low-budget movies by genre
+
+```{r}
+budget_threshold <- 1e6
+genre_order <- intersect(names(genre_palette), unique(compare_data$genre))
+
+low_budget_count <- sapply(genre_order, function(genre_name) {
+	sum(compare_data$genre == genre_name & !is.na(compare_data$production_budget) & compare_data$production_budget <= budget_threshold)
+})
+
+genre_total_count <- sapply(genre_order, function(genre_name) {
+	sum(compare_data$genre == genre_name)
+})
+
+low_budget_pct <- round(100 * low_budget_count / genre_total_count, 1)
+
+low_budget_table <- data.frame(
+	genre = genre_order,
+	low_budget_count = as.integer(low_budget_count),
+	total_genre_movies = as.integer(genre_total_count),
+	low_budget_percent = low_budget_pct,
+	row.names = NULL
+)
+
+if (nrow(low_budget_table) > 0) {
+	base_colors <- genre_color(low_budget_table$genre)
+	bar_colors_full <- rbind(base_colors, adjustcolor(base_colors, alpha.f = 0.45))
+	
+	# Scale percentages to match the plot's y-axis range (0 to 10%)
+	max_count <- max(low_budget_table$low_budget_count)
+	y_max <- max_count * 1.15
+	scale_factor <- y_max / 10  # Convert percentage (0-10%) to plot coordinates
+	
+	bar_matrix <- rbind(
+		Count = low_budget_table$low_budget_count,
+		Percentage = low_budget_table$low_budget_percent * scale_factor  # Scale percentages
+	)
+	
+	old_par <- par(mar = c(7, 5, 4, 5))
+	bar_positions <- barplot(
+		bar_matrix,
+		beside = TRUE,
+		col = bar_colors_full,
+		border = "white",
+		las = 2,
+		cex.names = 0.8,
+		ylab = "Number of Movies",
+		main = "Low-Budget Movies (≤$1M) by Genre",
+		names.arg = low_budget_table$genre,
+		ylim = c(0, y_max)
+	)
+
+	# Add labels: counts on first bars, percentages on second bars
+	text(
+		bar_positions[1, ],
+		low_budget_table$low_budget_count,
+		labels = low_budget_table$low_budget_count,
+		pos = 3,
+		cex = 0.75,
+		font = 2
+	)
+	
+	text(
+		bar_positions[2, ],
+		low_budget_table$low_budget_percent * scale_factor,
+		labels = paste0(low_budget_table$low_budget_percent, "%"),
+		pos = 3,
+		cex = 0.75,
+		font = 2
+	)
+
+	# Add secondary y-axis for percentages (0-10%)
+	axis(4, at = seq(0, y_max, length.out = 6), labels = seq(0, 10, by = 2), col = "gray50", col.axis = "gray50")
+	mtext("Percentage of Total Genre Movies (%)", side = 4, line = 3, col = "gray50", cex = 0.9)
+
+	# Create legend with actual colors
+	legend_colors <- c(base_colors[1], adjustcolor(base_colors[1], alpha.f = 0.45))
+	legend(
+		"topleft",
+		legend = c("Low-budget count (≤$1M)", "% of total movies in genre"),
+		fill = legend_colors,
+		bty = "n",
+		cex = 0.9
+	)
+	par(old_par)
+}
+```
+
+## Top 250 movies with lowest production budget
+
+```{r}
+lowest_budget_data <- compare_data[!is.na(compare_data$production_budget) & !is.na(compare_data$worldwide_gross), ]
+lowest_budget_data <- lowest_budget_data[order(lowest_budget_data$production_budget), ]
+lowest_budget_data <- head(lowest_budget_data, 250)
+
+if (nrow(lowest_budget_data) > 0) {
+	plot_colors <- genre_color(lowest_budget_data$genre)
+	x_vals <- lowest_budget_data$production_budget / 1e6
+	y_vals <- lowest_budget_data$worldwide_gross / 1e6
+
+	# Light jitter to reduce overlap while preserving the overall pattern.
+	x_jitter <- if (diff(range(x_vals, na.rm = TRUE)) > 0) {
+		jitter(x_vals, amount = diff(range(x_vals, na.rm = TRUE)) * 0.003)
+	} else {
+		x_vals
+	}
+
+	plot(
+		x_jitter,
+		y_vals,
+		pch = 16,
+		col = plot_colors,
+		xlab = "Production Budget ($ millions)",
+		ylab = "Worldwide Revenue ($ millions)",
+		main = "Lowest Budget Movies: Budget vs. Revenue",
+		cex = 1.2
+	)
+	
+	legend(
+		"topleft",
+		legend = names(genre_palette),
+		col = genre_palette,
+		pch = 16,
+		bty = "n",
+		cex = 0.85
+	)
+}
+```
+
+
+## First Result: Cheap Horror Movies Can Be Very Profitable
+The data clearly shows that horror movies are often produced with low budgets (20 movies with a production budget of $1M or less) and can achieve very high ROIs (5 of the 20 cheapest horror movies have a ROI > 100x, and 15/20 have a ROI >= 8x). This suggests that low-budget horror films can be a lucrative segment in the movie industry, offering high returns on investment compared to other genres.
+
+
+## Budget distribution by genre (count of movies per budget band)
+
+```{r}
+budget_data <- compare_data[!is.na(compare_data$production_budget) & !is.na(compare_data$genre), ]
+genre_order <- intersect(names(genre_palette), unique(budget_data$genre))
+
+budget_breaks <- c(-Inf, 1e6, 5e6, 20e6, 50e6, 100e6, Inf)
+budget_labels <- c("< $1M", "$1M-$5M", "$5M-$20M", "$20M-$50M", "$50M-$100M", "> $100M")
+
+if (length(genre_order) > 0 && nrow(budget_data) > 0) {
+	budget_data$budget_band <- cut(
+		budget_data$production_budget,
+		breaks = budget_breaks,
+		labels = budget_labels,
+		right = FALSE
+	)
+
+	band_count_table <- table(
+		factor(budget_data$budget_band, levels = budget_labels),
+		factor(budget_data$genre, levels = genre_order)
+	)
+
+	band_colors <- c("#2E86AB", "#A23B72", "#F18F01", "#4CAF50", "#6C757D", "#9C27B0")
+	old_par <- par(mar = c(7, 5, 4, 1))
+	bar_positions <- barplot(
+		band_count_table,
+		beside = TRUE,
+		col = band_colors,
+		border = "white",
+		las = 2,
+		cex.names = 0.9,
+		ylab = "Movie Count",
+		main = "How Production Budgets Are Distributed Across Genres",
+		names.arg = genre_order,
+		ylim = c(0, max(band_count_table) * 1.15)
+	)
+
+	text(
+		x = as.vector(bar_positions),
+		y = as.vector(band_count_table),
+		labels = as.vector(band_count_table),
+		pos = 3,
+		cex = 0.65
+	)
+
+	legend(
+		"topright",
+		legend = budget_labels,
+		fill = band_colors,
+		title = "Budget band",
+		bty = "n",
+		cex = 0.85
+	)
+	par(old_par)
+}
+```
