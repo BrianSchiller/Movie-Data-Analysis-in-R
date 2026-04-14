@@ -1140,8 +1140,8 @@ The data clearly shows that horror movies are often produced with low budgets (2
 budget_data <- compare_data[!is.na(compare_data$production_budget) & !is.na(compare_data$genre), ]
 genre_order <- intersect(names(genre_palette), unique(budget_data$genre))
 
-budget_breaks <- c(-Inf, 1e6, 5e6, 20e6, 50e6, 100e6, Inf)
-budget_labels <- c("< $1M", "$1M-$5M", "$5M-$20M", "$20M-$50M", "$50M-$100M", "> $100M")
+budget_breaks <- c(-Inf, 1e6, 5e6, 10e6, 20e6, 50e6, 100e6, Inf)
+budget_labels <- c("< $1M", "$1M-$5M", "$5M-$10M", "$10M-$20M", "$20M-$50M", "$50M-$100M", "> $100M")
 
 if (length(genre_order) > 0 && nrow(budget_data) > 0) {
 	budget_data$budget_band <- cut(
@@ -1156,7 +1156,7 @@ if (length(genre_order) > 0 && nrow(budget_data) > 0) {
 		factor(budget_data$genre, levels = genre_order)
 	)
 
-	band_colors <- c("#2E86AB", "#A23B72", "#F18F01", "#4CAF50", "#6C757D", "#9C27B0")
+	band_colors <- c("#2E86AB", "#A23B72", "#F18F01", "#FF7043", "#4CAF50", "#6C757D", "#9C27B0")
 	old_par <- par(mar = c(7, 5, 4, 1))
 	bar_positions <- barplot(
 		band_count_table,
@@ -1190,3 +1190,109 @@ if (length(genre_order) > 0 && nrow(budget_data) > 0) {
 	par(old_par)
 }
 ```
+
+## Multiple Linear Regression: Worldwide Gross vs Budget and Genre
+
+```{r}
+mlr_data <- compare_data[
+	!is.na(compare_data$worldwide_gross) &
+	!is.na(compare_data$production_budget) &
+	!is.na(compare_data$genre),
+	c("worldwide_gross", "production_budget", "genre")
+]
+mlr_data <- subset(mlr_data, worldwide_gross > 0 & production_budget > 0)
+
+# Set reference genre to the most frequent one for interpretability
+most_common_genre <- names(sort(table(mlr_data$genre), decreasing = TRUE))[1]
+mlr_data$genre <- relevel(factor(mlr_data$genre), ref = most_common_genre)
+
+mlr_data$log_worldwide <- log(mlr_data$worldwide_gross)
+mlr_data$log_budget    <- log(mlr_data$production_budget)
+
+# ── Models ────────────────────────────────────────────────────────────────────
+model_main        <- lm(log_worldwide ~ log_budget + genre, data = mlr_data)
+model_interaction <- lm(log_worldwide ~ log_budget * genre, data = mlr_data)
+
+# ── 1) R² ─────────────────────────────────────────────────────────────────────
+int_summary <- summary(model_interaction)
+cat("R-squared:", round(int_summary$r.squared, 3),
+    "| Adjusted R-squared:", round(int_summary$adj.r.squared, 3), "\n\n")
+
+# ── 2) Term-level F-tests & interaction comparison ────────────────────────────
+cat("Term-level F-tests (full interaction model):\n")
+print(drop1(model_interaction, test = "F"))
+
+cat("\nDoes adding interaction improve fit?\n")
+print(anova(model_main, model_interaction))
+
+# ── 3) Budget effect + interaction summary ────────────────────────────────────
+coef_table <- coef(int_summary)
+
+if ("log_budget" %in% rownames(coef_table)) {
+  budget_beta <- coef_table["log_budget", "Estimate"]
+  budget_p    <- coef_table["log_budget", "Pr(>|t|)"]
+  cat("\nBudget elasticity (reference genre:", most_common_genre, "):",
+      "beta =", round(budget_beta, 3),
+      ", p-value =", signif(budget_p, 3), "\n")
+}
+
+interaction_rows <- grep("^log_budget:genre", rownames(coef_table))
+if (length(interaction_rows) > 0) {
+  min_p <- min(coef_table[interaction_rows, "Pr(>|t|)"], na.rm = TRUE)
+  cat("Smallest interaction-term p-value:", signif(min_p, 3), "\n")
+}
+
+# ── 4) Full coefficient table ─────────────────────────────────────────────────
+cat("\nFull coefficient table:\n")
+printCoefmat(coef_table, digits = 3, signif.stars = TRUE)
+
+# ── 5) Effective budget elasticity per genre ──────────────────────────────────
+base_slope    <- coef(model_interaction)["log_budget"]
+int_coefs     <- coef(model_interaction)[grep("log_budget:genre", names(coef(model_interaction)))]
+genre_names   <- sub("log_budget:genre", "", names(int_coefs))
+
+slopes <- data.frame(
+  genre = c(most_common_genre, genre_names),
+  elasticity = c(base_slope, base_slope + int_coefs),
+  row.names = NULL
+)
+cat("\nEffective budget elasticity by genre:\n")
+print(slopes[order(-slopes$elasticity), ], row.names = FALSE)
+
+# ── 6) Interaction plot ───────────────────────────────────────────────────────
+# ── 6) Interaction plot (base R) ──────────────────────────────────────────────
+genres  <- levels(mlr_data$genre)
+colours <- palette.colors(length(genres), palette = "Okabe-Ito")  # colourblind-safe
+
+# Set up empty plot with correct axis ranges
+plot(mlr_data$log_budget, mlr_data$log_worldwide,
+    type = "n",
+	xlab = "log(Production Budget)",
+    ylab = "log(Worldwide Gross)",
+    main = "Budget vs. Revenue by Genre (log-log scale)")
+
+# Draw points and regression lines per genre
+for (i in seq_along(genres)) {
+	g    <- genres[i]
+	sub  <- mlr_data[mlr_data$genre == g, ]
+	fit  <- lm(log_worldwide ~ log_budget, data = sub)
+
+	points(sub$log_budget, sub$log_worldwide,
+			col = adjustcolor(colours[i], alpha.f = 0.25), pch = 16, cex = 0.7)
+	abline(fit, col = colours[i], lwd = 2)
+}
+
+legend("topleft", legend = genres, col = colours, lwd = 2, bty = "n")
+
+# # ── 7) Regression diagnostics ─────────────────────────────────────────────────
+# par(mfrow = c(2, 2))
+# plot(model_interaction)
+# par(mfrow = c(1, 1))
+```
+
+## Second Result: Expensive Horror Movies make less Revenue
+The multiple linear regression analaysis shows us, that 43.6% of the variance in revenue (adjusted R² = 0.436) can be explained through production budget and genre, which is reasonable given that many unobserved factors - marketing budget, cast, release timing, critical reception - also influence box office performance.
+
+As one would expect, budget is a strong predictor for revenue, with a significant positive elasticity of around 0.97 for the reference genre (Drama), meaning that a 1% increase in budget is associated with a near-proportional 0.97% increase in worldwide gross, a near-proportional relationship that was highly significant (p < 2×10⁻¹⁶). For Comedy, Adventure and Action we can see elasticity scores of >1, meaning that these movies profit from higher budgets. Notably, Horror is the only Outlier with an elasticity of 0,68.
+
+This shows us why there are significantly more cheap Horror movies than expensive ones, as higher budgets don't result in proportionally higher revenue.
