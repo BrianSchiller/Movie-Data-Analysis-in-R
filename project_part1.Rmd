@@ -1,0 +1,238 @@
+---
+title: "Movie Data Analysis"
+author: "TBD"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	comment = NA,
+	fig.align = "center",
+	fig.width = 10,
+	fig.height = 5,
+	out.width = "100%"
+)
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+genre_palette <- c(
+	Action = "#1f77b4",
+	Adventure = "#ff7f0e",
+	Comedy = "#2ca02c",
+	Drama = "#9467bd",
+	Horror = "#d62728"
+)
+
+genre_color <- function(genres) {
+	colors <- genre_palette[as.character(genres)]
+	colors[is.na(colors)] <- "#999999"
+	colors
+}
+```
+
+## Load and verify the data
+
+```{r}
+if (!requireNamespace("DT", quietly = TRUE)) {
+	stop("Package 'DT' is required. Install it once with: install.packages('DT', repos = 'https://cloud.r-project.org')")
+}
+
+movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+
+overview_table <- data.frame(
+	Metric = c("Rows", "Columns", "Numeric columns", "Character columns"),
+	Value = c(
+		nrow(movie_profit),
+		ncol(movie_profit),
+		sum(sapply(movie_profit, is.numeric)),
+		sum(sapply(movie_profit, is.character))
+	)
+)
+
+knitr::kable(overview_table, caption = "Dataset overview")
+```
+
+## Check variable types and first 5 values
+
+```{r}
+variable_overview <- data.frame(
+	variable = names(movie_profit),
+	type = sapply(movie_profit, function(x) class(x)[1]),
+	first_5_values = sapply(movie_profit, function(x) {
+		paste(head(x, 5), collapse = ", ")
+	}),
+	row.names = NULL
+)
+
+knitr::kable(variable_overview, caption = "Variable types and first 5 values")
+```
+
+## Convert release_date to Date type and check conversion results
+
+```{r}
+release_date_raw <- movie_profit$release_date
+movie_profit$release_date <- as.Date(release_date_raw, format = "%m/%d/%Y")
+
+conversion_table <- data.frame(
+	metric = c("Original type", "New type", "Invalid dates after conversion"),
+	value = c(
+		class(release_date_raw)[1],
+		class(movie_profit$release_date)[1],
+		sum(is.na(movie_profit$release_date) & !is.na(release_date_raw) & trimws(release_date_raw) != "")
+	)
+)
+
+knitr::kable(conversion_table, caption = "release_date conversion summary")
+```
+
+## Check for missing values, duplicates, and logical consistency
+
+```{r}
+# Missing values (NA or blank strings)
+missing_count <- sapply(movie_profit, function(x) {
+	if (is.character(x)) {
+		sum(is.na(x) | trimws(x) == "")
+	} else {
+		sum(is.na(x))
+	}
+})
+
+missing_pct <- round(100 * missing_count / nrow(movie_profit), 2)
+missing_summary <- data.frame(
+	variable = names(missing_count),
+	missing_count = as.integer(missing_count),
+	missing_percent = missing_pct,
+	row.names = NULL
+)
+
+# Duplicate rows
+dup_rows <- duplicated(movie_profit)
+dup_count <- sum(dup_rows)
+
+# Numeric column checks
+numeric_cols <- c("production_budget", "domestic_gross", "worldwide_gross")
+numeric_checks <- data.frame()
+for (col in numeric_cols) {
+	if (col %in% names(movie_profit)) {
+		x <- movie_profit[[col]]
+		numeric_checks <- rbind(
+			numeric_checks,
+			data.frame(
+				variable = col,
+				negative_values = sum(x < 0, na.rm = TRUE),
+				zero_values = sum(x == 0, na.rm = TRUE)
+			)
+		)
+	}
+}
+
+# Logical consistency check
+bad_gross_count <- NA
+if (all(c("domestic_gross", "worldwide_gross") %in% names(movie_profit))) {
+	bad_gross_rows <- which(movie_profit$worldwide_gross < movie_profit$domestic_gross)
+	bad_gross_count <- length(bad_gross_rows)
+}
+
+# Date parsing check
+bad_date_count <- sum(
+	is.na(movie_profit$release_date) &
+		!is.na(release_date_raw) &
+		trimws(release_date_raw) != ""
+)
+
+knitr::kable(missing_summary, caption = "Missing values by variable")
+
+dup_table <- data.frame(
+	metric = "Duplicate rows",
+	count = dup_count
+)
+knitr::kable(dup_table, caption = "Duplicate row summary")
+
+knitr::kable(numeric_checks, caption = "Numeric consistency checks")
+
+logic_table <- data.frame(
+	check = c("Rows where worldwide_gross < domestic_gross", "Invalid release_date values"),
+	count = c(bad_gross_count, bad_date_count)
+)
+knitr::kable(logic_table, caption = "Logical consistency checks")
+```
+
+## Estimate impact of removing rows with missing values or gross = 0
+
+```{r}
+# Row-level missing values (NA or blank strings) across all columns
+row_has_missing <- apply(movie_profit, 1, function(row) {
+	any(is.na(row) | trimws(as.character(row)) == "")
+})
+
+# Rows where either gross column is exactly zero
+gross_is_zero <-
+	movie_profit$domestic_gross == 0 |
+	movie_profit$worldwide_gross == 0
+
+overlap_count <- sum(row_has_missing & gross_is_zero)
+remove_all_count <- sum(row_has_missing | gross_is_zero)
+total_movies <- nrow(movie_profit)
+remove_all_pct <- round(100 * remove_all_count / total_movies, 2)
+
+# Same calculation, but ignore missing values in mpaa_rating
+cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
+row_has_missing_no_rating <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
+
+remove_no_rating_count <- sum(row_has_missing_no_rating | gross_is_zero)
+remove_no_rating_pct <- round(100 * remove_no_rating_count / total_movies, 2)
+
+impact_table <- data.frame(
+	metric = c(
+		"Rows with at least one missing value",
+		"Rows with gross value 0 (domestic or worldwide)",
+		"Overlap (missing and gross = 0)",
+		"Rows removed (missing or gross = 0)",
+		"Rows removed (ignoring missing mpaa_rating)"
+	),
+	count = c(
+		sum(row_has_missing),
+		sum(gross_is_zero),
+		overlap_count,
+		remove_all_count,
+		remove_no_rating_count
+	),
+	percent = c(
+		round(100 * sum(row_has_missing) / total_movies, 2),
+		round(100 * sum(gross_is_zero) / total_movies, 2),
+		round(100 * overlap_count / total_movies, 2),
+		remove_all_pct,
+		remove_no_rating_pct
+	)
+)
+
+knitr::kable(impact_table, caption = "Impact of filtering rules")
+```
+
+## Remove rows with missing values (except rating) and gross = 0
+
+```{r}
+cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
+
+row_has_NA <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
+
+gross_is_zero <-
+	movie_profit$domestic_gross == 0 |
+	movie_profit$worldwide_gross == 0
+
+movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
+
+cleaning_table <- data.frame(
+	metric = c("Rows before cleaning", "Rows after cleaning", "Rows removed"),
+	count = c(nrow(movie_profit), nrow(movie_profit_clean), nrow(movie_profit) - nrow(movie_profit_clean))
+)
+
+knitr::kable(cleaning_table, caption = "Cleaning summary")
+```
