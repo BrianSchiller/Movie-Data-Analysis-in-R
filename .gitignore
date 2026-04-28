@@ -1,3 +1,5 @@
 .lintr
 .Rprofile
+.RData
+.Rhistory
 r_project.html
