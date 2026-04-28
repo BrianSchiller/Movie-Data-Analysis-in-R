@@ -3,6 +3,9 @@ title: "Movie Data Analysis"
 author: "TBD"
 date: "`r Sys.Date()`"
 output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
@@ -55,7 +58,6 @@ overview_table <- data.frame(
 
 knitr::kable(overview_table, caption = "Dataset overview")
 ```
-
 
 ## Check variable types and first 5 values
 
@@ -236,13 +238,11 @@ knitr::kable(cleaning_table, caption = "Cleaning summary")
 ```
 
 ## Create new derived columns
-New columns:
-- International Gross (numerical)
-- ROI domestic (numerical)
-- ROI worldwide (numerical)
-- Top-100 domestic gross flag (boolean)
-- Top-100 international gross flag (boolean)
-- Is Horror Movie (logical flag)
+
+New columns: - International Gross (numerical) - ROI domestic
+(numerical) - ROI worldwide (numerical) - Top-100 domestic gross flag
+(boolean) - Top-100 international gross flag (boolean) - Is Horror Movie
+(logical flag)
 
 ```{r}
 movie_profit_enriched <- movie_profit_clean
@@ -712,7 +712,6 @@ if (length(all_years) > 0) {
 }
 ```
 
-
 ## Median ROI by year: horror vs non-horror
 
 ```{r}
@@ -902,16 +901,26 @@ DT::datatable(
 
 Horror demonstrates remarkable ROI efficiency in this dataset:
 
-**ROI Leadership:** Horror is significantly overrepresented at the top of the ROI rankings, with 5 of the top 10 films by ROI being horror titles (including #1 and #2)
+**ROI Leadership:** Horror is significantly overrepresented at the top
+of the ROI rankings, with 5 of the top 10 films by ROI being horror
+titles (including #1 and #2)
 
-**Early Advantage:** Except for some outliers (Exorcist 2 and The Shining), the earlierst horror movies (before 1982) all had a ROI > 10x, while the non-horror movies in that period had lower ROIs on average.
+**Early Advantage:** Except for some outliers (Exorcist 2 and The
+Shining), the earlierst horror movies (before 1982) all had a ROI \>
+10x, while the non-horror movies in that period had lower ROIs on
+average.
 
-**Number of Low-Budget Movies:** When sorting after the lowest production budget, we can see that Horror Movies are cheap to produce (20 movies cost <= $1M). For other Genres, the numbers are: Action (4), Adventure (2), Comedy (28), Drama (69).
+**Number of Low-Budget Movies:** When sorting after the lowest
+production budget, we can see that Horror Movies are cheap to produce
+(20 movies cost \<= \$1M). For other Genres, the numbers are: Action
+(4), Adventure (2), Comedy (28), Drama (69).
 
-**Low Risk, High Reward::** When sorting for production budget, we can also see that the cheapest Horror movies (<= $1M) are the movies which end up having a ROI > 100x (5/20 movies), while most movies have a ROI of >= 8x (15/20 movies). At the same time, in other genres the cheapest movies have a way lower ROI on average, with Drama only reaching an ROI >= 5x in half of the movies with a production budget <= $1M.
-
-
-
+**Low Risk, High Reward::** When sorting for production budget, we can
+also see that the cheapest Horror movies (\<= \$1M) are the movies which
+end up having a ROI \> 100x (5/20 movies), while most movies have a ROI
+of \>= 8x (15/20 movies). At the same time, in other genres the cheapest
+movies have a way lower ROI on average, with Drama only reaching an ROI
+\>= 5x in half of the movies with a production budget \<= \$1M.
 
 ## Top 20 movies by ROI
 
@@ -1129,10 +1138,14 @@ if (nrow(lowest_budget_data) > 0) {
 }
 ```
 
-
 ## First Result: Cheap Horror Movies Can Be Very Profitable
-The data clearly shows that horror movies are often produced with low budgets (20 movies with a production budget of $1M or less) and can achieve very high ROIs (5 of the 20 cheapest horror movies have a ROI > 100x, and 15/20 have a ROI >= 8x). This suggests that low-budget horror films can be a lucrative segment in the movie industry, offering high returns on investment compared to other genres.
 
+The data clearly shows that horror movies are often produced with low
+budgets (20 movies with a production budget of \$1M or less) and can
+achieve very high ROIs (5 of the 20 cheapest horror movies have a ROI \>
+100x, and 15/20 have a ROI \>= 8x). This suggests that low-budget horror
+films can be a lucrative segment in the movie industry, offering high
+returns on investment compared to other genres.
 
 ## Budget distribution by genre (count of movies per budget band)
 
@@ -1291,8 +1304,22 @@ legend("topleft", legend = genres, col = colours, lwd = 2, bty = "n")
 ```
 
 ## Second Result: Expensive Horror Movies make less Revenue
-The multiple linear regression analaysis shows us, that 43.6% of the variance in revenue (adjusted R² = 0.436) can be explained through production budget and genre, which is reasonable given that many unobserved factors - marketing budget, cast, release timing, critical reception - also influence box office performance.
 
-As one would expect, budget is a strong predictor for revenue, with a significant positive elasticity of around 0.97 for the reference genre (Drama), meaning that a 1% increase in budget is associated with a near-proportional 0.97% increase in worldwide gross, a near-proportional relationship that was highly significant (p < 2×10⁻¹⁶). For Comedy, Adventure and Action we can see elasticity scores of >1, meaning that these movies profit from higher budgets. Notably, Horror is the only Outlier with an elasticity of 0,68.
+The multiple linear regression analaysis shows us, that 43.6% of the
+variance in revenue (adjusted R² = 0.436) can be explained through
+production budget and genre, which is reasonable given that many
+unobserved factors - marketing budget, cast, release timing, critical
+reception - also influence box office performance.
 
-This shows us why there are significantly more cheap Horror movies than expensive ones, as higher budgets don't result in proportionally higher revenue.
+As one would expect, budget is a strong predictor for revenue, with a
+significant positive elasticity of around 0.97 for the reference genre
+(Drama), meaning that a 1% increase in budget is associated with a
+near-proportional 0.97% increase in worldwide gross, a near-proportional
+relationship that was highly significant (p \< 2×10⁻¹⁶). For Comedy,
+Adventure and Action we can see elasticity scores of \>1, meaning that
+these movies profit from higher budgets. Notably, Horror is the only
+Outlier with an elasticity of 0,68.
+
+This shows us why there are significantly more cheap Horror movies than
+expensive ones, as higher budgets don't result in proportionally higher
+revenue.
