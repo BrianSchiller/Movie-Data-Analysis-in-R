@@ -158,7 +158,7 @@ warranted.
 
 **Hypothesis:**
 
-- **H0* — the slope of log(budget) on log(worldwide gross) is identical
+- **H0** — the slope of log(budget) on log(worldwide gross) is identical
   across all five genres.
 - **H1** — at least one genre has a significantly different budget
   elasticity from the others.
@@ -575,3 +575,4 @@ if (length(horror_elasticity) == 0) horror_elasticity <- NA
 - **External validity.** The dataset covers a curated selection of films.
   Straight-to-streaming and international productions are largely absent,
   limiting generalisability.
+- **Outliers.** Log-transformation reduces the right-skew of the revenue distribution and stabilizes variance, but does not eliminate extreme observations. Action and Adventure films appear to dominate the upper tail of the revenue distribution; if confirmed, these high-leverage points could inflate the estimated budget elasticity for those genres, making their interaction terms appear more significant
