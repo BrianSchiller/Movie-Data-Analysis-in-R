@@ -9,6 +9,13 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
+# ── Global chunk options ────────────────────────────────────────────────────────
+# These settings apply to all code chunks in the document:
+#   • echo = FALSE      – hide R code from the rendered output
+#   • message/warning   – suppress package startup messages and warnings
+#   • comment = NA      – remove the leading "##" from console output
+#   • fig.align/width   – centre figures and set a consistent size
+#   • out.width = 100%  – make figures scale to the page width
 knitr::opts_chunk$set(
 	echo = FALSE,
 	message = FALSE,
@@ -20,8 +27,13 @@ knitr::opts_chunk$set(
 	out.width = "100%"
 )
 
+# Set the CRAN repository to avoid interactive prompts during package installation
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
+# ── Colour palette for genres ──────────────────────────────────────────────────
+# This named vector ensures that each genre always gets the same colour
+# across all plots, regardless of the order in which genres appear.
+# Any genre not listed here defaults to grey (#999999).
 genre_palette <- c(
 	Action = "#1f77b4",
 	Adventure = "#ff7f0e",
@@ -30,6 +42,8 @@ genre_palette <- c(
 	Horror = "#d62728"
 )
 
+# Helper function: maps a vector of genre names to the corresponding palette
+# colour; unknown genres are assigned a neutral grey.
 genre_color <- function(genres) {
 	colors <- genre_palette[as.character(genres)]
 	colors[is.na(colors)] <- "#999999"
