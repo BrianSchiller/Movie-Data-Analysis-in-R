@@ -1,0 +1,1104 @@
+---
+title: "Movie Data Analysis — Part 2: Exploratory Data Analysis"
+author: "TBD"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	comment = NA,
+	fig.align = "center",
+	fig.width = 10,
+	fig.height = 5,
+	out.width = "100%"
+)
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Colour palette shared across all genre-related charts.
+# Using named colours ensures that the same genre always gets the same colour
+# regardless of the order in which genres appear in a particular plot.
+genre_palette <- c(
+	Action    = "#1f77b4",
+	Adventure = "#ff7f0e",
+	Comedy    = "#2ca02c",
+	Drama     = "#9467bd",
+	Horror    = "#d62728"
+)
+
+# Helper: returns the palette colour for a vector of genre names,
+# defaulting to grey for any genre that is not in the palette.
+genre_color <- function(genres) {
+	colors <- genre_palette[as.character(genres)]
+	colors[is.na(colors)] <- "#999999"
+	colors
+}
+```
+
+```{r load-and-clean, include=FALSE}
+# ── Data preparation (repeated from Part 1 so this file is self-contained) ──
+#
+# We load the raw CSV, convert the date column, and apply the same filtering
+# rules established in Part 1:
+#   • drop rows with any missing value outside of mpaa_rating
+#   • drop rows where domestic_gross or worldwide_gross equals zero
+
+if (!requireNamespace("DT", quietly = TRUE)) {
+	stop("Package 'DT' is required. Install it with: install.packages('DT')")
+}
+
+movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+
+# Date conversion
+release_date_raw        <- movie_profit$release_date
+movie_profit$release_date <- as.Date(release_date_raw, format = "%m/%d/%Y")
+
+# Filter
+cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
+row_has_NA         <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
+gross_is_zero      <- movie_profit$domestic_gross  == 0 |
+                      movie_profit$worldwide_gross == 0
+
+movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
+```
+
+---
+
+## Overview
+
+This document covers **Part 2 — Exploratory Data Analysis** of the Movie
+Data Analysis project. The goal of EDA is to understand the dataset's
+structure, distributions, and relationships before building any statistical
+models.
+
+The analysis proceeds in four broad steps:
+
+1. **Variable description** — what each column represents  
+2. **New derived columns** — at least 10 engineered features  
+3. **Descriptive statistics** — central tendency, spread, and outliers  
+4. **Visualisations** — 13 charts with explanations of what each one reveals
+
+The cleaned dataset used here was produced in Part 1. It contains
+`r nrow(movie_profit_clean)` movies spanning the genres Action, Adventure,
+Comedy, Drama, and Horror.
+
+---
+
+## 1  Variable description
+
+The table below lists every column in the cleaned dataset, its data type,
+and a short description of what it measures. Understanding the raw variables
+is the essential first step before any transformation or analysis.
+
+```{r variable-description}
+# Build a human-readable description for each original column
+var_desc <- data.frame(
+	variable = c(
+		"X", "release_date", "movie", "production_budget",
+		"domestic_gross", "worldwide_gross", "distributor",
+		"mpaa_rating", "genre"
+	),
+	type = c(
+		"integer", "Date", "character", "numeric",
+		"numeric", "numeric", "character",
+		"character", "character"
+	),
+	description = c(
+		"Row index from the original CSV (not analytically meaningful)",
+		"Date the film was released in US cinemas (MM/DD/YYYY → Date)",
+		"Film title",
+		"Reported production budget in USD",
+		"Total box-office receipts from US/Canada markets in USD",
+		"Total box-office receipts from all markets in USD",
+		"Studio or distribution company releasing the film",
+		"MPAA content rating (G, PG, PG-13, R, etc.); has missing values",
+		"Primary genre as classified by the data source"
+	),
+	stringsAsFactors = FALSE
+)
+
+knitr::kable(var_desc, caption = "Original variables in the cleaned dataset")
+```
+
+---
+
+## 2  Creating new derived columns
+
+The original dataset provides budgets and gross revenues, but many
+analytically interesting quantities — such as profitability or market
+segments — must be computed.  Below we create **12 new columns** covering:
+
+* financial indicators (international gross, ROI),  
+* ranking flags (top-100 lists),  
+* categorical groupings (budget bands, horror flag, movie type label),  
+* scaled versions for display purposes.
+
+```{r derived-columns}
+movie_profit_enriched <- movie_profit_clean
+
+# ── 1. International gross ────────────────────────────────────────────────────
+# The non-domestic portion of worldwide revenue. Useful for understanding
+# how dependent a film's success is on the international market.
+movie_profit_enriched$international_gross <-
+	movie_profit_enriched$worldwide_gross - movie_profit_enriched$domestic_gross
+
+# ── 2 & 3. ROI factors ────────────────────────────────────────────────────────
+# Return-on-investment expressed as a multiplier (e.g. 3.0 means the film
+# earned 3× its production budget). We compute both a domestic and a
+# worldwide version. Using a factor rather than a percentage makes it easy
+# to say "this film returned 10× its budget."
+movie_profit_enriched$roi_domestic_factor <- with(
+	movie_profit_enriched,
+	ifelse(production_budget > 0, domestic_gross  / production_budget, NA_real_)
+)
+
+movie_profit_enriched$roi_worldwide_factor <- with(
+	movie_profit_enriched,
+	ifelse(production_budget > 0, worldwide_gross / production_budget, NA_real_)
+)
+
+# ── 4 & 5. Top-100 flags ──────────────────────────────────────────────────────
+# Boolean flags marking whether a film ranks in the top 100 by domestic or
+# international gross. These provide a simple, interpretable way to identify
+# "blockbuster" films without choosing an arbitrary revenue threshold.
+rank_domestic      <- rank(-movie_profit_enriched$domestic_gross,      ties.method = "first")
+rank_international <- rank(-movie_profit_enriched$international_gross, ties.method = "first")
+
+movie_profit_enriched$top100_domestic_gross      <- rank_domestic      <= 100
+movie_profit_enriched$top100_international_gross <- rank_international <= 100
+
+# ── 6. Horror flag ───────────────────────────────────────────────────────────
+# A logical column that is TRUE when the genre column contains "horror"
+# (case-insensitive). This is the primary grouping variable for the
+# Horror vs. Non-horror comparison that runs throughout the project.
+movie_profit_enriched$is_horror_movie <-
+	grepl("horror", movie_profit_enriched$genre, ignore.case = TRUE)
+
+# ── 7. Movie type label ───────────────────────────────────────────────────────
+# A readable character version of is_horror_movie, convenient for plot labels
+# and table captions.
+movie_profit_enriched$movie_type <-
+	ifelse(movie_profit_enriched$is_horror_movie, "Horror", "Non-horror")
+
+# ── 8. Budget band ────────────────────────────────────────────────────────────
+# Binning production budgets into seven ordered categories allows us to
+# compare how many films in each genre fall into each spending tier.
+budget_breaks <- c(-Inf, 1e6, 5e6, 10e6, 20e6, 50e6, 100e6, Inf)
+budget_labels <- c("< $1M", "$1M–$5M", "$5M–$10M",
+                   "$10M–$20M", "$20M–$50M", "$50M–$100M", "> $100M")
+
+movie_profit_enriched$budget_band <- cut(
+	movie_profit_enriched$production_budget,
+	breaks = budget_breaks,
+	labels = budget_labels,
+	right  = FALSE
+)
+
+# ── 9 & 10. Scaled financial columns (× $1,000) ───────────────────────────────
+# Expressing large dollar amounts in thousands keeps the interactive table
+# readable without sacrificing numeric sort order.
+movie_profit_enriched$production_budget_k <- movie_profit_enriched$production_budget / 1000
+movie_profit_enriched$domestic_gross_k    <- movie_profit_enriched$domestic_gross    / 1000
+movie_profit_enriched$worldwide_gross_k   <- movie_profit_enriched$worldwide_gross   / 1000
+
+# ── 11 & 12. Formatted date and release year ─────────────────────────────────
+# A character column for display (ISO 8601) and an integer year used for
+# time-series aggregations.
+movie_profit_enriched$release_date_fmt <-
+	ifelse(is.na(movie_profit_enriched$release_date), NA_character_,
+	       format(movie_profit_enriched$release_date, "%Y-%m-%d"))
+
+movie_profit_enriched$release_year <-
+	as.integer(format(movie_profit_enriched$release_date, "%Y"))
+
+# ── Preview ───────────────────────────────────────────────────────────────────
+preview_cols <- c(
+	"movie", "production_budget", "domestic_gross", "worldwide_gross",
+	"international_gross", "roi_domestic_factor", "roi_worldwide_factor",
+	"top100_domestic_gross", "top100_international_gross",
+	"is_horror_movie", "movie_type", "budget_band"
+)
+
+knitr::kable(
+	head(movie_profit_enriched[, preview_cols], 6),
+	caption = "Preview of the 12 newly derived columns (first 6 rows)"
+)
+```
+
+**Summary of new columns**
+
+| # | Column | Type | Purpose |
+|---|--------|------|---------|
+| 1 | `international_gross` | numeric | Revenue outside domestic market |
+| 2 | `roi_domestic_factor` | numeric | Domestic gross ÷ production budget |
+| 3 | `roi_worldwide_factor` | numeric | Worldwide gross ÷ production budget |
+| 4 | `top100_domestic_gross` | logical | Top-100 film by domestic revenue |
+| 5 | `top100_international_gross` | logical | Top-100 film by international revenue |
+| 6 | `is_horror_movie` | logical | Genre contains "horror" |
+| 7 | `movie_type` | character | Readable label ("Horror" / "Non-horror") |
+| 8 | `budget_band` | factor | Seven ordered budget tiers |
+| 9 | `production_budget_k` | numeric | Budget in thousands USD |
+| 10 | `domestic_gross_k` | numeric | Domestic gross in thousands USD |
+| 11 | `worldwide_gross_k` | numeric | Worldwide gross in thousands USD |
+| 12 | `release_year` | integer | Calendar year of release |
+
+---
+
+## 3  Descriptive statistics
+
+This section quantifies the central tendency, spread, and outlier
+prevalence for every numeric column. Because financial variables are
+heavily right-skewed (a handful of blockbusters drive the mean far above
+the median), we report both measures alongside the full five-number
+summary and a standard-deviation table.
+
+```{r descriptive-stats}
+analysis_data <- movie_profit_enriched
+
+# Variables to summarise — exclude the meaningless row index
+numeric_vars     <- names(analysis_data)[sapply(analysis_data, is.numeric)]
+numeric_vars     <- setdiff(numeric_vars, "X")
+categorical_vars <- intersect(c("genre", "mpaa_rating", "distributor"), names(analysis_data))
+
+# ── Dataset profile ───────────────────────────────────────────────────────────
+release_dates <- analysis_data$release_date
+profile_table <- data.frame(
+	metric = c(
+		"Rows", "Columns", "Numeric variables",
+		"Categorical variables", "Unique movies",
+		"Release year range"
+	),
+	value = c(
+		nrow(analysis_data),
+		ncol(analysis_data),
+		length(numeric_vars),
+		length(categorical_vars),
+		length(unique(analysis_data$movie)),
+		paste(format(min(release_dates), "%Y"), "to", format(max(release_dates), "%Y"))
+	),
+	stringsAsFactors = FALSE
+)
+knitr::kable(profile_table, caption = "Analysis dataset profile")
+
+# ── Five-number summary for numeric columns ───────────────────────────────────
+num_summary_mat <- do.call(
+	cbind,
+	lapply(analysis_data[, numeric_vars, drop = FALSE], summary)
+)
+num_summary <- data.frame(
+	statistic   = rownames(num_summary_mat),
+	num_summary_mat,
+	row.names   = NULL,
+	check.names = FALSE
+)
+for (col in numeric_vars) {
+	num_summary[[col]] <- format(
+		round(as.numeric(num_summary[[col]]), 2),
+		big.mark   = ",",
+		scientific = FALSE,
+		trim       = TRUE
+	)
+}
+print(knitr::kable(num_summary, caption = "Five-number summary (numeric variables)"))
+
+# ── Mean vs median ────────────────────────────────────────────────────────────
+# Large gaps between mean and median signal skewed distributions / outliers.
+mean_median_table <- data.frame(
+	variable = numeric_vars,
+	mean     = round(sapply(analysis_data[, numeric_vars, drop = FALSE], mean,   na.rm = TRUE), 2),
+	median   = round(sapply(analysis_data[, numeric_vars, drop = FALSE], median, na.rm = TRUE), 2),
+	row.names = NULL
+)
+mean_median_table$mean   <- format(mean_median_table$mean,   big.mark = ",", scientific = FALSE, trim = TRUE)
+mean_median_table$median <- format(mean_median_table$median, big.mark = ",", scientific = FALSE, trim = TRUE)
+print(knitr::kable(mean_median_table, caption = "Mean and median — large gaps indicate skewness"))
+
+# ── Standard deviations ───────────────────────────────────────────────────────
+sd_table <- data.frame(
+	variable  = numeric_vars,
+	sd        = round(sapply(analysis_data[, numeric_vars, drop = FALSE], sd, na.rm = TRUE), 2),
+	row.names = NULL
+)
+sd_table$sd <- format(sd_table$sd, big.mark = ",", scientific = FALSE, trim = TRUE)
+print(knitr::kable(sd_table, caption = "Standard deviation by variable"))
+
+# ── IQR-based outlier count ───────────────────────────────────────────────────
+# An observation is flagged as an outlier if it falls more than 1.5 × IQR
+# below Q1 or above Q3 — the classic Tukey fence rule.
+outlier_stats <- do.call(rbind, lapply(numeric_vars, function(v) {
+	x   <- analysis_data[[v]]
+	q1  <- quantile(x, 0.25, na.rm = TRUE)
+	q3  <- quantile(x, 0.75, na.rm = TRUE)
+	iqr <- q3 - q1
+	lo  <- x < (q1 - 1.5 * iqr)
+	hi  <- x > (q3 + 1.5 * iqr)
+	data.frame(
+		variable           = v,
+		outlier_count      = sum(lo | hi, na.rm = TRUE),
+		outlier_percent    = round(100 * sum(lo | hi, na.rm = TRUE) / sum(!is.na(x)), 2),
+		low_outlier_count  = sum(lo, na.rm = TRUE),
+		high_outlier_count = sum(hi, na.rm = TRUE)
+	)
+}))
+print(knitr::kable(outlier_stats, caption = "IQR outlier summary (Tukey 1.5 × IQR rule)"))
+
+# ── Categorical summaries ─────────────────────────────────────────────────────
+cat_table <- do.call(rbind, lapply(categorical_vars, function(v) {
+	x         <- analysis_data[[v]]
+	x_valid   <- x[!(is.na(x) | trimws(x) == "")]
+	tab       <- sort(table(x_valid), decreasing = TRUE)
+	data.frame(
+		variable          = v,
+		unique_levels     = length(unique(x_valid)),
+		most_common       = names(tab)[1],
+		most_common_count = as.integer(tab[1])
+	)
+}))
+print(knitr::kable(cat_table, caption = "Categorical variable summary"))
+```
+
+---
+
+## 4  Visualisations
+
+Each subsection below presents one or more related charts.  For every
+chart we state:
+
+* **Why** we created it — the analytical question it addresses.  
+* **What** it shows — a plain-language reading of the main visual patterns.  
+* **How** it helps — what we learn about the dataset from this view.
+
+---
+
+### Chart 1 — Genre distribution
+
+**Why:** Genre is the most important categorical variable in this dataset.
+Before any comparison we need to know how many films each genre
+contributes, to be aware of sample-size differences that could affect
+the reliability of genre-level statistics.
+
+**What:** Drama and Comedy are by far the most represented genres, while
+Horror and Adventure form a much smaller share of the catalogue.
+
+**How:** An imbalanced genre distribution means that averages for under-
+represented genres (especially Horror) are based on fewer observations and
+may be more volatile. We should keep this in mind when interpreting the
+Horror vs. Non-horror comparisons later.
+
+```{r chart1-genre}
+genre_tab <- sort(table(analysis_data$genre), decreasing = TRUE)
+top_n     <- min(10, length(genre_tab))
+
+barplot(
+	genre_tab[1:top_n],
+	las  = 2,
+	col  = genre_color(names(genre_tab[1:top_n])),
+	main = "Chart 1 — Number of Movies by Genre",
+	ylab = "Number of Movies"
+)
+```
+
+---
+
+### Chart 2 — MPAA rating distribution
+
+**Why:** The MPAA rating (G, PG, PG-13, R) restricts the audience a film
+can reach and therefore influences its potential box-office ceiling.
+Understanding the rating mix helps contextualise revenue comparisons.
+
+**What:** R-rated films dominate the dataset, followed by PG-13. G and
+PG films are relatively rare.
+
+**How:** Since R-rated films are the most common, any genre that skews
+heavily toward R (such as Horror) will have its revenue compared against
+a baseline where R films are the norm — which is useful to know when
+we later model the effect of genre on revenue.
+
+```{r chart2-mpaa}
+rating_tab <- sort(table(analysis_data$mpaa_rating), decreasing = TRUE)
+barplot(
+	rating_tab,
+	col  = "skyblue",
+	main = "Chart 2 — MPAA Rating Distribution",
+	ylab = "Number of Movies"
+)
+```
+
+---
+
+### Chart 3 — Movies released per year
+
+**Why:** The temporal coverage of a dataset matters: if most films come
+from a short recent period, earlier decades are under-represented and
+long-run trend analyses could be misleading.
+
+**What:** Production volume is low in the 1970s and rises steadily
+through the 1980s and 1990s, with a notable increase from the 2000s
+onward before plateauing.
+
+**How:** The dataset has reasonable coverage from the late 1970s through
+the mid-2010s. Years with fewer than ~10 films (mainly pre-1980) should
+be treated with caution in any year-by-year comparison.
+
+```{r chart3-yearly}
+year_tab <- table(analysis_data$release_year)
+year_tab <- year_tab[order(as.integer(names(year_tab)))]
+
+barplot(
+	as.integer(year_tab),
+	names.arg = names(year_tab),
+	col       = "darkorange",
+	border    = "white",
+	las       = 2,
+	cex.names = 0.7,
+	xlab      = "Release Year",
+	ylab      = "Number of Movies",
+	main      = "Chart 3 — Movies Released Per Year"
+)
+```
+
+---
+
+### Chart 4 — Top 10 distributors
+
+**Why:** A few large studios dominate film distribution. Knowing which
+distributors are best-represented in the data helps us understand
+whether the dataset reflects the full market or mainly one segment of it.
+
+**What:** The major Hollywood studios (e.g. Warner Bros., Universal,
+Paramount) account for the vast majority of films.
+
+**How:** Because large distributors handle films across many genres, their
+dominance in the data suggests that the dataset is broadly representative
+of mainstream studio output rather than, say, indie or international cinema.
+
+```{r chart4-distributor}
+dist_tab <- sort(table(analysis_data$distributor), decreasing = TRUE)
+top_n    <- min(10, length(dist_tab))
+
+barplot(
+	dist_tab[1:top_n],
+	las       = 2,
+	cex.names = 0.8,
+	col       = "cornflowerblue",
+	main      = "Chart 4 — Top 10 Distributors by Number of Movies",
+	ylab      = "Number of Movies"
+)
+```
+
+---
+
+### Descriptive comparison: Horror vs. Non-horror
+
+Before plotting trends we summarise the key financial metrics for both
+groups side by side. Horror films have notably lower median production
+budgets than non-horror films but comparable (and sometimes superior)
+median ROI — a pattern we will explore in depth in the charts that follow.
+
+```{r horror-summary-table}
+compare_data <- movie_profit_enriched
+
+# Helper: count IQR-based outliers in a numeric vector
+count_iqr_outliers <- function(x) {
+	x <- x[!is.na(x)]
+	if (length(x) < 4) return(0)
+	q1  <- quantile(x, 0.25)
+	q3  <- quantile(x, 0.75)
+	iqr <- q3 - q1
+	sum(x < (q1 - 1.5 * iqr) | x > (q3 + 1.5 * iqr))
+}
+
+# Build summary for each group
+build_group_stats <- function(flag) {
+	d <- compare_data[flag, ]
+	c(
+		movie_count            = sum(flag),
+		budget_mean            = round(mean(d$production_budget,   na.rm = TRUE), 2),
+		budget_q1              = round(quantile(d$production_budget,   0.25, na.rm = TRUE), 2),
+		budget_median          = round(median(d$production_budget,  na.rm = TRUE), 2),
+		budget_q3              = round(quantile(d$production_budget,   0.75, na.rm = TRUE), 2),
+		worldwide_mean         = round(mean(d$worldwide_gross,     na.rm = TRUE), 2),
+		worldwide_q1           = round(quantile(d$worldwide_gross,     0.25, na.rm = TRUE), 2),
+		worldwide_median       = round(median(d$worldwide_gross,   na.rm = TRUE), 2),
+		worldwide_q3           = round(quantile(d$worldwide_gross,     0.75, na.rm = TRUE), 2),
+		roi_domestic_mean      = round(mean(d$roi_domestic_factor, na.rm = TRUE), 2),
+		roi_domestic_q1        = round(quantile(d$roi_domestic_factor, 0.25, na.rm = TRUE), 2),
+		roi_domestic_median    = round(median(d$roi_domestic_factor, na.rm = TRUE), 2),
+		roi_domestic_q3        = round(quantile(d$roi_domestic_factor, 0.75, na.rm = TRUE), 2),
+		roi_domestic_outliers  = count_iqr_outliers(d$roi_domestic_factor),
+		roi_worldwide_mean     = round(mean(d$roi_worldwide_factor, na.rm = TRUE), 2),
+		roi_worldwide_q1       = round(quantile(d$roi_worldwide_factor, 0.25, na.rm = TRUE), 2),
+		roi_worldwide_median   = round(median(d$roi_worldwide_factor, na.rm = TRUE), 2),
+		roi_worldwide_q3       = round(quantile(d$roi_worldwide_factor, 0.75, na.rm = TRUE), 2),
+		roi_worldwide_outliers = count_iqr_outliers(d$roi_worldwide_factor)
+	)
+}
+
+horror_stats     <- build_group_stats(compare_data$is_horror_movie)
+non_horror_stats <- build_group_stats(!compare_data$is_horror_movie)
+
+summary_table <- data.frame(
+	metric      = names(horror_stats),
+	Horror      = unname(horror_stats),
+	`Non-horror` = unname(non_horror_stats),
+	check.names = FALSE
+)
+
+for (col in c("Horror", "Non-horror")) {
+	summary_table[[col]] <- format(summary_table[[col]],
+	                               big.mark = ",", scientific = FALSE, trim = TRUE)
+}
+
+knitr::kable(summary_table, caption = "Horror vs. Non-horror — key financial metrics")
+```
+
+---
+
+### Charts 5 & 6 — Horror and Non-horror film counts per year
+
+**Why:** Before comparing financial performance over time we first need
+to see whether both groups have similar temporal coverage. If Horror films
+are concentrated in a particular decade, that era's economic conditions
+(rather than genre) might explain observed ROI differences.
+
+**What:** Horror film counts per year fluctuate considerably, with peaks
+in the early 1980s and again from the mid-2000s onward.  Non-horror counts
+follow a smoother upward trend driven by the overall growth of the industry.
+
+**How:** Because both groups span the full date range of the dataset, the
+time-series ROI comparisons in Charts 7 and 8 are not confounded by one
+group being systematically older or newer.
+
+```{r chart5-horror-yearly}
+valid_rows        <- !is.na(compare_data$release_year) & compare_data$release_year >= 1975
+horror_year_tab   <- table(compare_data$release_year[valid_rows &  compare_data$is_horror_movie])
+horror_year_tab   <- horror_year_tab[order(as.integer(names(horror_year_tab)))]
+year_range        <- range(compare_data$release_year[valid_rows], na.rm = TRUE)
+
+plot(
+	as.integer(names(horror_year_tab)),
+	as.integer(horror_year_tab),
+	type = "l", lwd = 2, col = "firebrick",
+	xlim = year_range,
+	xlab = "Release Year", ylab = "Number of Horror Movies",
+	main = "Chart 5 — Horror Movies per Year"
+)
+```
+
+```{r chart6-nonhorror-yearly}
+non_horror_year_tab <- table(compare_data$release_year[valid_rows & !compare_data$is_horror_movie])
+non_horror_year_tab <- non_horror_year_tab[order(as.integer(names(non_horror_year_tab)))]
+
+plot(
+	as.integer(names(non_horror_year_tab)),
+	as.integer(non_horror_year_tab),
+	type = "l", lwd = 2, col = "steelblue",
+	xlim = year_range,
+	xlab = "Release Year", ylab = "Number of Non-horror Movies",
+	main = "Chart 6 — Non-horror Movies per Year"
+)
+```
+
+---
+
+### Chart 7 — Average ROI per year: Horror vs. Non-horror
+
+**Why:** Comparing yearly *average* ROI between the two groups reveals
+whether Horror's reputedly high return is a persistent structural trait or
+a feature of specific years or eras.
+
+**What:** Horror tends to have high average ROI in years where one
+breakout low-budget hit (e.g. *Blair Witch Project*, *Paranormal Activity*)
+inflates the mean dramatically. The y-axis is capped at 20× and any
+year exceeding that cap is marked with a triangle; the actual values are
+printed below the chart.
+
+**How:** The dramatic spikes in Horror average ROI are largely driven by
+outlier blockbusters rather than a consistently higher return across all
+films. This motivates the median comparison in Chart 8, which is more
+robust to such outliers.
+
+```{r chart7-avg-roi}
+roi_vals  <- compare_data$roi_worldwide_factor
+vr        <- !is.na(compare_data$release_year) & !is.na(roi_vals)
+all_years <- sort(unique(compare_data$release_year[vr]))
+all_years <- all_years[all_years >= 1975]
+
+# Compute yearly means for each group
+avg_roi_fn <- function(flag) {
+	tapply(roi_vals[vr & flag], compare_data$release_year[vr & flag], mean)
+}
+horror_avg_by_year     <- avg_roi_fn(compare_data$is_horror_movie)
+non_horror_avg_by_year <- avg_roi_fn(!compare_data$is_horror_movie)
+
+h_series  <- as.numeric(horror_avg_by_year[as.character(all_years)])
+nh_series <- as.numeric(non_horror_avg_by_year[as.character(all_years)])
+
+y_cap <- 20
+
+plot_capped_series <- function(h, nh, years, cap, ylabel, title_str) {
+	h_plot  <- pmin(h,  cap)
+	nh_plot <- pmin(nh, cap)
+	h_over  <- which(!is.na(h)  & h  > cap)
+	nh_over <- which(!is.na(nh) & nh > cap)
+
+	plot(years, h_plot, type = "l", lwd = 2, col = "firebrick",
+	     xlab = "Release Year", ylab = ylabel, main = title_str,
+	     ylim = c(0, cap))
+	lines(years, nh_plot, lwd = 2, col = "steelblue")
+
+	if (length(h_over)  > 0) points(years[h_over],  rep(cap, length(h_over)),
+	                                 pch = 24, bg = "firebrick",  col = "firebrick",  cex = 0.8)
+	if (length(nh_over) > 0) points(years[nh_over], rep(cap, length(nh_over)),
+	                                 pch = 24, bg = "steelblue", col = "steelblue", cex = 0.8)
+
+	legend("topright",
+	       legend = c("Horror", "Non-horror", paste0("Value > ", cap, " (triangle)")),
+	       col    = c("firebrick", "steelblue", "black"),
+	       lwd    = c(2, 2, NA), pch = c(NA, NA, 24),
+	       pt.bg  = c(NA, NA, "gray60"), bty = "n")
+
+	note_fn <- function(idx, series, label) {
+		if (length(idx) == 0) return(invisible(NULL))
+		cat(label, paste0(years[idx], " (", round(series[idx], 2), "x)", collapse = ", "), "\n")
+	}
+	cat(paste0("Years where average ROI exceeded ", cap, "x:\n"))
+	note_fn(h_over,  h,  "  Horror:     ")
+	note_fn(nh_over, nh, "  Non-horror: ")
+}
+
+plot_capped_series(
+	h_series, nh_series, all_years, y_cap,
+	ylabel     = "Average ROI (Worldwide)",
+	title_str  = "Chart 7 — Average Worldwide ROI per Year: Horror vs. Non-horror (capped at 20×)"
+)
+```
+
+---
+
+### Chart 8 — Median ROI per year: Horror vs. Non-horror
+
+**Why:** The median is resistant to extreme outliers; it tells us what a
+*typical* film in each group earned relative to its budget in a given year.
+Comparing Charts 7 and 8 shows how much of Horror's apparent advantage
+is driven by a few extreme hits.
+
+**What:** The median Horror ROI is consistently above the Non-horror
+median in most years, even after removing the influence of outliers. The
+gap narrows in recent decades as blockbuster budgets across genres
+increased.
+
+**How:** The persistent median advantage for Horror confirms that its
+higher ROI is a structural pattern, not purely an outlier phenomenon.
+Low budgets combined with audience demand for scare entertainment appear
+to create a favourable risk-reward profile.
+
+```{r chart8-median-roi}
+med_roi_fn <- function(flag) {
+	tapply(roi_vals[vr & flag], compare_data$release_year[vr & flag], median)
+}
+horror_med_by_year     <- med_roi_fn(compare_data$is_horror_movie)
+non_horror_med_by_year <- med_roi_fn(!compare_data$is_horror_movie)
+
+h_med  <- as.numeric(horror_med_by_year[as.character(all_years)])
+nh_med <- as.numeric(non_horror_med_by_year[as.character(all_years)])
+
+plot_capped_series(
+	h_med, nh_med, all_years, y_cap,
+	ylabel    = "Median ROI (Worldwide)",
+	title_str = "Chart 8 — Median Worldwide ROI per Year: Horror vs. Non-horror (capped at 20×)"
+)
+```
+
+---
+
+### Interactive table — all movies
+
+**Why:** Summary statistics and aggregated charts can obscure the
+individual films that drive the patterns. An interactive, filterable table
+allows us to inspect any movie directly, verify specific claims, and
+explore genre or distributor sub-groups on demand.
+
+**What:** The table shows title, genre, worldwide ROI, production cost,
+domestic and worldwide gross (all financial columns in thousands of USD),
+release date, MPAA rating, and distributor. It is sortable on every column
+and filterable by genre via the drop-down above the table.
+
+**How:** Sorting by ROI (descending) immediately reveals the Horror films
+at the top of the rankings. Sorting by production budget (ascending)
+highlights the very cheap Horror films that achieve extraordinary returns —
+an observation we quantify in Charts 10 and 11.
+
+```{r interactive-table}
+display_table <- movie_profit_enriched[, c(
+	"movie", "genre", "roi_worldwide_factor",
+	"production_budget_k", "domestic_gross_k", "worldwide_gross_k",
+	"release_date_fmt", "mpaa_rating", "distributor"
+)]
+
+names(display_table) <- c(
+	"Movie", "Genre", "ROI (×)",
+	"Production Cost (×$1k)", "Domestic Gross (×$1k)", "Worldwide Gross (×$1k)",
+	"Release Date", "MPAA Rating", "Distributor"
+)
+
+display_table$`ROI (×)`                <- round(display_table$`ROI (×)`,                2)
+display_table$`Production Cost (×$1k)` <- round(display_table$`Production Cost (×$1k)`, 1)
+display_table$`Domestic Gross (×$1k)`  <- round(display_table$`Domestic Gross (×$1k)`,  1)
+display_table$`Worldwide Gross (×$1k)` <- round(display_table$`Worldwide Gross (×$1k)`, 1)
+
+DT::datatable(
+	display_table,
+	rownames = FALSE,
+	options  = list(
+		pageLength = 15,
+		lengthMenu = c(10, 15, 25, 50),
+		order      = list(list(5, "desc")),
+		autoWidth  = TRUE
+	),
+	callback = DT::JS(
+		"var genreColumn = 1;",
+		"var wrapper = $(table.table().container());",
+		"var controls = $('<div style=\"margin-bottom: 8px;\"></div>');",
+		"var label    = $('<label style=\"margin-right: 8px; font-weight: 600;\">Genre:</label>');",
+		"var select   = $('<select style=\"padding: 2px 6px;\"><option value=\"\">All genres</option></select>');",
+		"select.on('change', function() {",
+		"  var val = $.fn.dataTable.util.escapeRegex($(this).val());",
+		"  table.column(genreColumn).search(val ? '^' + val + '$' : '', true, false).draw();",
+		"});",
+		"table.column(genreColumn).data().unique().sort().each(function(d) {",
+		"  if (d !== null && d !== undefined && d !== '') {",
+		"    select.append($('<option></option>').attr('value', d).text(d));",
+		"  }",
+		"});",
+		"controls.append(label).append(select);",
+		"wrapper.prepend(controls);"
+	),
+	caption = "All movies — sortable and filterable (Genre drop-down above table; financial columns in thousands USD)"
+)
+```
+
+**Key observations from the table:**
+
+* **ROI leadership:** Horror is significantly over-represented at the top
+  of the ROI rankings; 5 of the top 10 films by worldwide ROI are Horror
+  titles (including rank 1 and 2).
+* **Early advantage:** Most Horror films released before 1982 show a ROI
+  above 10×, whereas non-Horror films from the same era average
+  considerably lower.
+* **Number of low-budget movies:** When sorted by production cost, 20 Horror
+  films cost ≤ $1M. The counts for other genres are: Action (4),
+  Adventure (2), Comedy (28), Drama (69).
+* **Low risk, high reward:** Of the 20 cheapest Horror films (≤ $1M),
+  5 achieve a ROI above 100× and 15 achieve at least 8×. Comparable
+  Drama films at that budget level reach ≥ 5× ROI in only about half of
+  cases.
+
+---
+
+### Chart 9 — Top 20 movies by worldwide ROI
+
+**Why:** Identifying the individual films with the highest ROI provides
+concrete examples of the outlier blockbusters that drive the mean ROI
+spikes we saw in Chart 7.
+
+**What:** Horror titles (red) dominate the upper portion of the chart,
+with Comedy (green) and Drama (purple) also represented. The leading films
+have ROI values far above 100×.
+
+**How:** Seeing the actual titles and their genres confirms that Horror's
+ROI advantage is driven by real, well-known films with extremely low
+budgets and unexpectedly large box-office receipts — not by data
+artefacts.
+
+```{r chart9-top20-roi, fig.height=7}
+roi_plot_data <- compare_data[!is.na(compare_data$roi_worldwide_factor), ]
+roi_plot_data <- roi_plot_data[order(-roi_plot_data$roi_worldwide_factor), ]
+roi_plot_data <- head(roi_plot_data, 20)
+roi_plot_data <- roi_plot_data[order(roi_plot_data$roi_worldwide_factor), ]  # ascending for barplot
+
+roi_colors <- genre_color(roi_plot_data$genre)
+
+par(mar = c(5, 12, 4, 2))
+roi_bars <- barplot(
+	roi_plot_data$roi_worldwide_factor,
+	horiz     = TRUE, las = 1,
+	col       = roi_colors, border = "white",
+	xlab      = "ROI (×)",
+	main      = "Chart 9 — Top 20 Movies by Worldwide ROI",
+	names.arg = roi_plot_data$movie,
+	cex.names = 0.65
+)
+text(
+	x      = roi_plot_data$roi_worldwide_factor,
+	y      = roi_bars,
+	labels = round(roi_plot_data$roi_worldwide_factor, 1),
+	pos    = 4, cex = 0.75
+)
+legend("bottomright", legend = names(genre_palette),
+       fill = genre_palette, bty = "n", cex = 0.8)
+```
+
+---
+
+### Chart 10 — ROI of the earliest 50 films per genre (scatter plots)
+
+**Why:** If early films systematically had higher ROI than recent ones,
+the Horror advantage might simply reflect the fact that Horror films were
+made earlier when production costs were lower relative to box-office
+revenue.
+
+**What:** All five genre panels are shown on the same y-axis scale to
+allow direct comparison. In each panel, points above the dashed line
+(ROI = 1) recouped their budget; points below it were loss-makers.
+
+**How:** The scatter plots show that very high ROI outliers exist in
+multiple genres in the early era, but Horror has a higher density of
+extreme high-ROI points — particularly in the 1970s and 1980s. This
+suggests that Horror's advantage in the early era is real and not
+purely a function of low production costs across the board.
+
+```{r chart10-earliest50, fig.width=14, fig.height=12}
+genres_to_plot   <- intersect(names(genre_palette), unique(compare_data$genre))
+earliest_by_genre <- lapply(genres_to_plot, function(g) {
+	gd <- compare_data[
+		compare_data$genre == g &
+		!is.na(compare_data$release_date) &
+		!is.na(compare_data$roi_worldwide_factor), ]
+	gd <- gd[order(gd$release_date), ]
+	head(gd, 50)
+})
+names(earliest_by_genre) <- genres_to_plot
+
+max_roi <- max(unlist(lapply(earliest_by_genre, function(x) x$roi_worldwide_factor)), na.rm = TRUE)
+y_limit <- c(0, if (is.finite(max_roi)) max_roi else 1)
+
+old_par <- par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
+for (g in names(earliest_by_genre)) {
+	gd <- earliest_by_genre[[g]]
+	plot(gd$release_date, gd$roi_worldwide_factor,
+	     pch = 16, col = genre_palette[[g]],
+	     xlab = "Release Date", ylab = "ROI (×)",
+	     main = paste0("Chart 10 — ", g, " (earliest 50 films)"),
+	     ylim = y_limit)
+	abline(h = 1, lty = 3, col = "gray70")
+}
+# Fill any empty panels in the 3×2 grid
+if (length(genres_to_plot) < 6) for (i in seq_len(6 - length(genres_to_plot))) plot.new()
+par(old_par)
+```
+
+---
+
+### Chart 11 — Low-budget films (≤ $1M) by genre
+
+**Why:** Horror is often described as a "cheap-to-make" genre. This chart
+quantifies that claim by counting how many films in each genre were
+produced on a budget of $1M or less — and what percentage of each genre's
+total output that represents.
+
+**What:** In absolute terms, Drama has the most low-budget films, but
+Horror has a proportionally high share: roughly 10% of Horror films cost
+≤ $1M, compared to much lower percentages for Action and Adventure.
+
+**How:** The high proportion of micro-budget Horror films is a key
+structural feature of the genre. These films carry very low financial risk
+and, as seen in Chart 9, can generate exceptional returns — which explains
+why studios and independent producers alike continue to greenlight them.
+
+```{r chart11-low-budget}
+budget_threshold <- 1e6
+genre_order      <- intersect(names(genre_palette), unique(compare_data$genre))
+
+low_budget_count   <- sapply(genre_order, function(g) {
+	sum(compare_data$genre == g &
+	    !is.na(compare_data$production_budget) &
+	    compare_data$production_budget <= budget_threshold)
+})
+genre_total_count  <- sapply(genre_order, function(g) sum(compare_data$genre == g))
+low_budget_pct     <- round(100 * low_budget_count / genre_total_count, 1)
+
+low_budget_table   <- data.frame(
+	genre              = genre_order,
+	low_budget_count   = as.integer(low_budget_count),
+	total_genre_movies = as.integer(genre_total_count),
+	low_budget_percent = low_budget_pct,
+	row.names          = NULL
+)
+
+base_colors    <- genre_color(low_budget_table$genre)
+bar_colors_mat <- rbind(base_colors, adjustcolor(base_colors, alpha.f = 0.45))
+
+max_count      <- max(low_budget_table$low_budget_count)
+y_max          <- max_count * 1.15
+scale_factor   <- y_max / 10   # maps 0–10% onto the y-axis
+
+bar_matrix <- rbind(
+	Count      = low_budget_table$low_budget_count,
+	Percentage = low_budget_table$low_budget_percent * scale_factor
+)
+
+old_par       <- par(mar = c(7, 5, 4, 5))
+bar_positions <- barplot(
+	bar_matrix,
+	beside    = TRUE, col = bar_colors_mat, border = "white",
+	las = 2, cex.names = 0.8,
+	ylab      = "Number of Movies",
+	main      = "Chart 11 — Low-Budget Films (≤$1M) by Genre",
+	names.arg = low_budget_table$genre,
+	ylim      = c(0, y_max)
+)
+
+text(bar_positions[1, ], low_budget_table$low_budget_count,
+     labels = low_budget_table$low_budget_count,
+     pos = 3, cex = 0.75, font = 2)
+text(bar_positions[2, ], low_budget_table$low_budget_percent * scale_factor,
+     labels = paste0(low_budget_table$low_budget_percent, "%"),
+     pos = 3, cex = 0.75, font = 2)
+
+axis(4, at = seq(0, y_max, length.out = 6), labels = seq(0, 10, by = 2),
+     col = "gray50", col.axis = "gray50")
+mtext("Percentage of Genre Total (%)", side = 4, line = 3, col = "gray50", cex = 0.9)
+
+legend_colors <- c(base_colors[1], adjustcolor(base_colors[1], alpha.f = 0.45))
+legend("topleft", legend = c("Count (≤$1M)", "% of genre total"),
+       fill = legend_colors, bty = "n", cex = 0.9)
+par(old_par)
+```
+
+---
+
+### Chart 12 — Budget vs. worldwide revenue (250 lowest-budget films)
+
+**Why:** Focusing on the cheapest films and comparing their budgets to
+their revenues directly tests whether low-budget films can "punch above
+their weight" — i.e. whether a tiny investment can generate
+disproportionately large returns.
+
+**What:** At very low budgets (< $0.5M) several films — mostly Horror and
+Comedy — achieved revenues of tens of millions of dollars, implying
+extraordinary ROI. However, many films in the same budget range earned
+little.
+
+**How:** The chart illustrates the high-risk, high-reward nature of
+micro-budget filmmaking. While the best performers yield exceptional
+returns, a substantial portion of low-budget films earns far less than
+expected. Horror stands out because its ratio of high earners to low
+earners is unusually favourable.
+
+```{r chart12-budget-vs-revenue}
+lb_data <- compare_data[
+	!is.na(compare_data$production_budget) &
+	!is.na(compare_data$worldwide_gross), ]
+lb_data <- lb_data[order(lb_data$production_budget), ]
+lb_data <- head(lb_data, 250)
+
+plot_colors <- genre_color(lb_data$genre)
+x_vals <- lb_data$production_budget / 1e6
+y_vals <- lb_data$worldwide_gross   / 1e6
+
+# Slight jitter on the x-axis so stacked points remain visible
+x_jitter <- jitter(x_vals, amount = diff(range(x_vals, na.rm = TRUE)) * 0.003)
+
+plot(
+	x_jitter, y_vals,
+	pch  = 16, col  = plot_colors,
+	xlab = "Production Budget ($ millions)",
+	ylab = "Worldwide Revenue ($ millions)",
+	main = "Chart 12 — 250 Lowest-Budget Films: Budget vs. Revenue",
+	cex  = 1.2
+)
+legend("topleft", legend = names(genre_palette),
+       col = genre_palette, pch = 16, bty = "n", cex = 0.85)
+```
+
+---
+
+### Chart 13 — Budget band distribution across genres
+
+**Why:** Beyond the micro-budget segment, we want to understand the full
+budget spectrum for each genre. Are some genres exclusively mid-budget, or
+does every genre span the full range?
+
+**What:** Action and Adventure are heavily concentrated in the high-budget
+tiers (> $50M and > $100M), whereas Horror is overwhelmingly represented
+in the lower tiers (< $10M). Comedy and Drama span a wider range.
+
+**How:** The stark contrast in budget profiles confirms that Horror is a
+structurally different type of production compared to action-oriented
+genres. This budget-structure difference is central to understanding why
+Horror's ROI behaves differently — something we will model formally in
+Part 3.
+
+```{r chart13-budget-bands, fig.height=6}
+budget_data  <- compare_data[
+	!is.na(compare_data$production_budget) &
+	!is.na(compare_data$genre), ]
+
+budget_data$budget_band <- cut(
+	budget_data$production_budget,
+	breaks = budget_breaks,
+	labels = budget_labels,
+	right  = FALSE
+)
+
+band_count_table <- table(
+	factor(budget_data$budget_band, levels = budget_labels),
+	factor(budget_data$genre,       levels = genre_order)
+)
+
+band_colors <- c("#2E86AB", "#A23B72", "#F18F01", "#FF7043",
+                 "#4CAF50", "#6C757D", "#9C27B0")
+
+old_par       <- par(mar = c(7, 5, 4, 1))
+bar_positions <- barplot(
+	band_count_table,
+	beside    = TRUE, col = band_colors, border = "white",
+	las = 2, cex.names = 0.9,
+	ylab      = "Movie Count",
+	main      = "Chart 13 — Budget Band Distribution Across Genres",
+	names.arg = genre_order,
+	ylim      = c(0, max(band_count_table) * 1.15)
+)
+text(
+	x      = as.vector(bar_positions),
+	y      = as.vector(band_count_table),
+	labels = as.vector(band_count_table),
+	pos    = 3, cex = 0.65
+)
+legend("topright", legend = budget_labels, fill = band_colors,
+       title = "Budget tier", bty = "n", cex = 0.85)
+par(old_par)
+```
+
+---
+
+## 5  Key findings from EDA
+
+The exploratory analysis surfaces three main findings that will motivate
+the modelling in Part 3:
+
+1. **Low-budget Horror films produce unusually high ROI.** The top of the
+   worldwide ROI ranking is dominated by Horror films that cost very little
+   to produce (often < $1M) but earned tens or hundreds of millions at the
+   box office.
+
+2. **Horror's ROI advantage is structural, not incidental.** Both the
+   median ROI comparison (Chart 8) and the budget-band distribution
+   (Chart 13) confirm that Horror operates in a different financial
+   regime from Action, Adventure, and Drama.  Even after removing outliers,
+   the typical Horror film returns more per dollar of production investment
+   than its non-Horror counterpart.
+
+3. **Higher budgets help most genres but not Horror as much.** The
+   interactive table and Chart 12 suggest that increasing the budget of a
+   Horror film does not proportionally increase its revenue — a hypothesis
+   we will test formally using regression in Part 3.
+```
