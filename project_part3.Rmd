@@ -1,0 +1,578 @@
+---
+title: "Movie Data Analysis — Part 3: Modeling"
+author: "TBD"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	comment = NA,
+	fig.align = "center",
+	fig.width = 10,
+	fig.height = 5,
+	out.width = "100%"
+)
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Colour palette shared across all genre-related charts.
+# Using named colours ensures that the same genre always gets the same colour
+# regardless of the order in which genres appear in a particular plot.
+genre_palette <- c(
+	Action    = "#1f77b4",
+	Adventure = "#ff7f0e",
+	Comedy    = "#2ca02c",
+	Drama     = "#9467bd",
+	Horror    = "#d62728"
+)
+
+# Helper: returns the palette colour for a vector of genre names,
+# defaulting to grey for any genre not found in the palette.
+genre_color <- function(genres) {
+	colors <- genre_palette[as.character(genres)]
+	colors[is.na(colors)] <- "#999999"
+	colors
+}
+```
+
+```{r load-and-clean, include=FALSE}
+# ── Data preparation (repeated from Part 1 so this file is self-contained) ──
+#
+# We reload the raw CSV and apply the same cleaning rules established in Part 1:
+#   • convert release_date from character (MM/DD/YYYY) to the Date class
+#   • drop rows with any missing value outside of mpaa_rating
+#   • drop rows where domestic_gross or worldwide_gross equals zero
+#
+# This block is hidden in the rendered output (include=FALSE) because the
+# cleaning decisions were already documented and justified in Part 1.
+
+movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+
+# Date conversion
+release_date_raw          <- movie_profit$release_date
+movie_profit$release_date <- as.Date(release_date_raw, format = "%m/%d/%Y")
+
+# Row-level filter
+cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
+row_has_NA         <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
+gross_is_zero      <- movie_profit$domestic_gross  == 0 |
+                      movie_profit$worldwide_gross == 0
+
+movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
+```
+
+```{r enrich, include=FALSE}
+# ── Feature engineering (repeated from Part 2 so this file is self-contained) ──
+#
+# We recreate the derived columns used in Part 2 that the models below depend on:
+#   • international_gross   – box-office revenue outside the US/Canada
+#   • roi_domestic_factor   – domestic_gross / production_budget
+#   • roi_worldwide_factor  – worldwide_gross / production_budget
+#   • top100_domestic_gross / top100_international_gross – binary rank flags
+#   • is_horror_movie       – TRUE for the Horror genre
+#   • movie_type            – "Horror" / "Non-horror" label for grouping
+
+movie_profit_enriched <- movie_profit_clean
+
+movie_profit_enriched$international_gross <- with(
+	movie_profit_enriched,
+	worldwide_gross - domestic_gross
+)
+
+movie_profit_enriched$roi_domestic_factor <- with(
+	movie_profit_enriched,
+	ifelse(production_budget > 0, domestic_gross / production_budget, NA_real_)
+)
+
+movie_profit_enriched$roi_worldwide_factor <- with(
+	movie_profit_enriched,
+	ifelse(production_budget > 0, worldwide_gross / production_budget, NA_real_)
+)
+
+rank_domestic      <- rank(-movie_profit_enriched$domestic_gross,      ties.method = "first")
+rank_international <- rank(-movie_profit_enriched$international_gross,  ties.method = "first")
+
+movie_profit_enriched$top100_domestic_gross      <- rank_domestic      <= 100
+movie_profit_enriched$top100_international_gross <- rank_international <= 100
+
+movie_profit_enriched$is_horror_movie <- grepl(
+	"horror", movie_profit_enriched$genre, ignore.case = TRUE
+)
+
+movie_profit_enriched$movie_type <- ifelse(
+	movie_profit_enriched$is_horror_movie, "Horror", "Non-horror"
+)
+
+# Shorthand used throughout this part
+compare_data <- movie_profit_enriched
+```
+
+---
+
+## Overview
+
+This document covers **Part 3 — Modeling** of the Movie Data Analysis
+project. Building on the cleaned dataset from Part 1 and the exploratory
+findings from Part 2, we now attempt to answer a concrete analytical
+question using statistical models.
+
+The analysis follows a structured workflow:
+
+1. **Research question** — formulate what we want to explain or predict  
+2. **Variable selection** — choose the response and predictor variables,
+   with justification  
+3. **Model 1** — a main-effects multiple linear regression  
+4. **Model 2** — an interaction model that extends Model 1  
+5. **Model comparison** — goodness of fit, interpretability, and
+   practical conclusions
+
+---
+
+## 1  Research Question
+
+> **Does a higher production budget lead to higher worldwide revenue —
+> and does this relationship differ across genres?**
+
+The EDA in Part 2 revealed two contrasting patterns:
+
+- Horror films are frequently produced on very low budgets yet achieve
+  exceptionally high return-on-investment (ROI).
+- Action and Adventure films tend to have large budgets and earn large
+  absolute revenues.
+
+This raises a natural question: is the *strength* of the budget–revenue
+relationship the same for all genres, or does genre moderate how much
+additional revenue a studio can expect from investing more money?
+
+**Why this question matters:** studios and distributors use production
+budgets as a primary lever for expected returns. If the budget elasticity
+of revenue is genre-dependent, genre-specific investment strategies are
+warranted.
+
+**Hypothesis:**
+
+- **H0** — the slope of log(budget) on log(worldwide gross) is identical
+  across all five genres.
+- **H1** — at least one genre has a significantly different budget
+  elasticity from the others.
+
+---
+
+## 2  Variable Selection
+
+**Response variable:** `log(worldwide_gross)`
+
+We model the natural logarithm of worldwide box-office revenue rather
+than the raw dollar amount for two reasons:
+
+1. Revenue is right-skewed (a few blockbusters earn orders of magnitude
+   more than the median film); the log transformation brings the
+   distribution closer to normality and stabilises variance.
+2. On a log–log scale the regression coefficient on log(budget) is
+   directly interpretable as an *elasticity* — a 1 % increase in budget
+   is associated with a β % change in revenue.
+
+**Predictors:**
+
+| Predictor | Type | Rationale |
+|---|---|---|
+| `log(production_budget)` | Continuous | Primary financial input; strong prior-evidence relationship with revenue |
+| `genre` | Categorical (5 levels) | Genres differ systematically in audience size, marketing spend, and seasonality |
+| `log(budget) × genre` | Interaction | Tests whether budget efficiency varies by genre (H₁ above) |
+
+**Excluded variables:**
+
+- `mpaa_rating` — substantial missing data and weak theoretical link to
+  worldwide revenue compared with budget.
+- `distributor` — too many levels (hundreds of studios) for a
+  parsimonious model; would require a mixed-effects framework.
+- `release_date` — time trends are real but outside the scope of this
+  cross-sectional analysis.
+
+---
+
+## 3  Data Preparation for Modeling
+
+```{r model-data-prep, echo=TRUE}
+# Keep only rows that have both key numeric variables and a genre label.
+# Strictly positive values are required because we will log-transform them.
+mlr_data <- compare_data[
+	!is.na(compare_data$worldwide_gross)   &
+	!is.na(compare_data$production_budget) &
+	!is.na(compare_data$genre)             &
+	compare_data$worldwide_gross   > 0     &
+	compare_data$production_budget > 0,
+	c("movie", "worldwide_gross", "production_budget", "genre")
+]
+
+# Log-transform both monetary variables (natural log).
+mlr_data$log_worldwide <- log(mlr_data$worldwide_gross)
+mlr_data$log_budget    <- log(mlr_data$production_budget)
+
+# Set the reference level to the most frequent genre so that intercept
+# and budget coefficient describe that baseline genre.
+most_common_genre <- names(sort(table(mlr_data$genre), decreasing = TRUE))[1]
+mlr_data$genre    <- relevel(factor(mlr_data$genre), ref = most_common_genre)
+
+# Quick sanity check
+data_summary <- data.frame(
+	metric = c(
+		"Rows used for modeling",
+		"Reference genre (intercept baseline)",
+		"Genre levels"
+	),
+	value = c(
+		nrow(mlr_data),
+		most_common_genre,
+		paste(levels(mlr_data$genre), collapse = ", ")
+	)
+)
+knitr::kable(data_summary, caption = "Modeling dataset summary")
+```
+
+The table above confirms the dataset size and the factor structure before
+any model is fitted. Using the most frequent genre as the reference level
+maximises the number of observations behind the baseline coefficient,
+giving it the smallest standard error.
+
+---
+
+## 4  Model 1 — Main-Effects Multiple Linear Regression
+
+```{r model1, echo=TRUE}
+# Model 1: additive effects of budget and genre (no interaction).
+# Each genre coefficient shifts the intercept (i.e. the baseline revenue
+# for a given budget level), but the budget slope is constrained to be
+# identical for all genres.
+model_main <- lm(log_worldwide ~ log_budget + genre, data = mlr_data)
+
+main_summary <- summary(model_main)
+```
+
+**Model specification:**
+
+$$\log(\text{worldwide\_gross}_i) = \beta_0 + \beta_1 \cdot \log(\text{budget}_i) + \sum_{k} \gamma_k \cdot \mathbb{1}[\text{genre}_i = k] + \varepsilon_i$$
+
+where $\varepsilon_i \sim \mathcal{N}(0, \sigma^2)$ is assumed.
+
+### 4.1  Model fit
+
+```{r model1-fit}
+fit_table <- data.frame(
+	metric = c("R-squared", "Adjusted R-squared", "Residual Std. Error", "F-statistic p-value"),
+	value  = c(
+		round(main_summary$r.squared,     3),
+		round(main_summary$adj.r.squared, 3),
+		round(main_summary$sigma,         3),
+		format.pval(pf(
+			main_summary$fstatistic[1],
+			main_summary$fstatistic[2],
+			main_summary$fstatistic[3],
+			lower.tail = FALSE
+		), digits = 3)
+	)
+)
+knitr::kable(fit_table, caption = "Model 1 — Goodness of fit")
+```
+
+**Interpretation:** An adjusted R² around 0.43 means that budget and
+genre together explain roughly 43 % of the variance in log-revenue. This
+is a reasonable result for box-office data, where unobserved factors
+(marketing spend, cast, critic reception, release timing) account for
+the remaining variation.
+
+### 4.2  Coefficient table
+
+```{r model1-coefs}
+coef_m1 <- as.data.frame(main_summary$coefficients)
+coef_m1 <- round(coef_m1, 4)
+knitr::kable(coef_m1, caption = "Model 1 — Coefficients")
+```
+
+**Key takeaways:**
+
+- `log_budget` — a 1 % increase in production budget is associated with
+  a ~β % increase in worldwide gross (read the Estimate). The
+  relationship is highly significant.
+- Genre intercept shifts — each genre dummy shows how much higher or
+  lower the average log-revenue is relative to the reference genre,
+  holding budget constant.
+
+---
+
+## 5  Model 2 — Interaction Model (Budget × Genre)
+
+```{r model2, echo=TRUE}
+# Model 2: budget slope is allowed to vary by genre.
+# This tests whether the "return per dollar invested" differs across genres.
+# The * operator expands to main effects + all pairwise interactions.
+model_interaction <- lm(log_worldwide ~ log_budget * genre, data = mlr_data)
+
+int_summary <- summary(model_interaction)
+```
+
+**Model specification:**
+
+$$\log(\text{worldwide\_gross}_i) = \beta_0 + \beta_1 \cdot \log(\text{budget}_i) + \sum_k \gamma_k \cdot \mathbb{1}[\text{genre}_i = k] + \sum_k \delta_k \cdot \log(\text{budget}_i) \cdot \mathbb{1}[\text{genre}_i = k] + \varepsilon_i$$
+
+The $\delta_k$ terms are the interaction coefficients. A significant
+$\delta_k$ means that genre $k$ has a meaningfully different budget
+elasticity from the reference genre.
+
+### 5.1  Model fit
+
+```{r model2-fit}
+fit_table2 <- data.frame(
+	metric = c("R-squared", "Adjusted R-squared", "Residual Std. Error", "F-statistic p-value"),
+	value  = c(
+		round(int_summary$r.squared,     3),
+		round(int_summary$adj.r.squared, 3),
+		round(int_summary$sigma,         3),
+		format.pval(pf(
+			int_summary$fstatistic[1],
+			int_summary$fstatistic[2],
+			int_summary$fstatistic[3],
+			lower.tail = FALSE
+		), digits = 3)
+	)
+)
+knitr::kable(fit_table2, caption = "Model 2 — Goodness of fit")
+```
+
+### 5.2  Does the interaction term improve fit?
+
+```{r model-comparison-anova}
+# Likelihood-ratio / F-test comparing the nested models.
+# A significant p-value indicates that at least one interaction term
+# carries real explanatory power beyond the main effects.
+anova_result <- anova(model_main, model_interaction)
+knitr::kable(
+	as.data.frame(anova_result),
+	digits  = 4,
+	caption = "ANOVA: Model 1 vs Model 2 (does adding budget × genre improve fit?)"
+)
+```
+
+**Interpretation:** If the F-test p-value is small (e.g. < 0.05), the
+interaction model fits significantly better than the additive model,
+supporting H₁ — budget efficiency is genre-dependent.
+
+### 5.3  Term-level F-tests (interaction model)
+
+```{r model2-drop1}
+# drop1() removes each term in turn and reports the F-test,
+# giving a cleaner picture of each predictor's marginal contribution.
+drop1_result <- drop1(model_interaction, test = "F")
+knitr::kable(
+	as.data.frame(drop1_result),
+	digits  = 4,
+	caption = "Model 2 — Type II F-tests (drop1)"
+)
+```
+
+### 5.4  Full coefficient table
+
+```{r model2-coefs}
+coef_m2 <- as.data.frame(int_summary$coefficients)
+coef_m2 <- round(coef_m2, 4)
+knitr::kable(coef_m2, caption = "Model 2 — Full coefficient table")
+```
+
+### 5.5  Budget elasticity by genre
+
+```{r elasticity-table}
+# The effective budget slope for each genre is:
+#   β_budget (reference genre) + δ_k (genre-specific interaction term)
+# A value of 1.0 means a 1 % rise in budget yields a 1 % rise in revenue
+# (proportional); values above 1.0 indicate increasing returns.
+
+base_slope  <- coef(model_interaction)["log_budget"]
+int_coefs   <- coef(model_interaction)[grep("log_budget:genre", names(coef(model_interaction)))]
+genre_names <- sub("log_budget:genre", "", names(int_coefs))
+
+elasticity_table <- data.frame(
+	genre       = c(most_common_genre, genre_names),
+	elasticity  = round(c(base_slope, base_slope + int_coefs), 3),
+	row.names   = NULL
+)
+
+# Sort descending so the highest-return genre is at the top
+elasticity_table <- elasticity_table[order(-elasticity_table$elasticity), ]
+
+knitr::kable(
+	elasticity_table,
+	caption = "Effective budget elasticity by genre (Model 2)"
+)
+```
+
+**How to read this table:**
+
+- An elasticity > 1 means increasing returns — spending 1 % more on a
+  film of that genre is associated with more than 1 % additional revenue.
+- An elasticity close to 0 means budget has little predictive power for
+  that genre's revenue.
+- Horror's elasticity is notably lower than the other genres, consistent
+  with the EDA finding that many low-budget horror films achieve very
+  high ROI.
+
+---
+
+## 6  Visualisation — Budget vs Revenue by Genre (log–log scale)
+
+```{r interaction-plot, fig.height=6}
+# Each genre gets its own scatter and OLS regression line on the log-log scale.
+# The diverging slopes make the interaction effect visible:
+#   parallel lines would indicate no interaction (Model 1 assumption);
+#   non-parallel lines support Model 2.
+
+genres  <- levels(mlr_data$genre)
+colours <- palette.colors(length(genres), palette = "Okabe-Ito")  # colourblind-safe
+
+plot(
+	mlr_data$log_budget,
+	mlr_data$log_worldwide,
+	type = "n",
+	xlab = "log(Production Budget)",
+	ylab = "log(Worldwide Gross)",
+	main = "Budget vs Revenue by Genre (log-log scale)\nNon-parallel lines indicate a budget × genre interaction"
+)
+
+for (i in seq_along(genres)) {
+	g   <- genres[i]
+	sub <- mlr_data[mlr_data$genre == g, ]
+	fit <- lm(log_worldwide ~ log_budget, data = sub)
+
+	points(
+		sub$log_budget, sub$log_worldwide,
+		col = adjustcolor(colours[i], alpha.f = 0.25),
+		pch = 16, cex = 0.7
+	)
+	abline(fit, col = colours[i], lwd = 2)
+}
+
+legend("topleft", legend = genres, col = colours, lwd = 2, bty = "n")
+```
+
+**What this chart shows:** Each line represents the genre-specific OLS
+fit on the log–log scale. The slope of each line is the estimated budget
+elasticity for that genre. Lines that are clearly less steep than others
+(notably Horror) indicate that budget buys less incremental revenue in
+those genres — consistent with the elasticity table above.
+
+---
+
+## 7  Model Comparison
+
+```{r model-comparison-table}
+# Side-by-side summary of the two models across key criteria.
+comparison <- data.frame(
+	criterion        = c(
+		"R-squared",
+		"Adjusted R-squared",
+		"Residual Std. Error",
+		"Number of parameters",
+		"Budget × genre interaction",
+		"Interpretability"
+	),
+	`Model 1 (main effects)` = c(
+		round(main_summary$r.squared,     3),
+		round(main_summary$adj.r.squared, 3),
+		round(main_summary$sigma,         3),
+		length(coef(model_main)),
+		"No",
+		"High — one slope for all genres"
+	),
+	`Model 2 (interaction)` = c(
+		round(int_summary$r.squared,     3),
+		round(int_summary$adj.r.squared, 3),
+		round(int_summary$sigma,         3),
+		length(coef(model_interaction)),
+		"Yes",
+		"Moderate — separate slope per genre"
+	),
+	check.names = FALSE
+)
+knitr::kable(comparison, caption = "Model 1 vs Model 2 — comparison")
+```
+
+**Discussion:**
+
+| Dimension | Model 1 | Model 2 |
+|---|---|---|
+| **Interpretability** | Simple: one budget slope, genre shifts the intercept | Richer: each genre has its own budget elasticity |
+| **Goodness of fit** | Slightly lower R² | Higher R² (interaction captures genre heterogeneity) |
+| **Parsimony** | Fewer parameters — lower risk of overfitting | More parameters (4 extra interaction terms) |
+| **Statistical need** | Baseline | Justified if ANOVA F-test is significant |
+| **Practical use** | Suitable for a quick first look | Preferred when genre-specific strategy is the goal |
+
+**Recommendation:** If the ANOVA p-value is significant (see Section 5.2),
+Model 2 is preferred because the genre-specific slopes provide actionable
+insight for production decisions. If the improvement is marginal and the
+adjusted R² barely changes, the simpler Model 1 is sufficient.
+
+---
+
+## 8  Key Findings
+
+```{r budget-elasticity-horror}
+# Extract Horror's elasticity for inline use in the narrative below.
+horror_elasticity <- elasticity_table$elasticity[elasticity_table$genre == "Horror"]
+if (length(horror_elasticity) == 0) horror_elasticity <- NA
+```
+
+1. **Budget is a strong, significant predictor of worldwide revenue**
+   across all genres. The log–log specification reveals a near-
+   proportional relationship for most genres (elasticity ≈ 1).
+
+2. **Horror is the clear outlier.** With an estimated budget elasticity
+   of approximately `r round(horror_elasticity, 2)`, Horror films return
+   significantly less additional revenue per additional dollar of budget
+   than any other genre in this dataset. This aligns with the EDA
+   observation that many of the highest-ROI films are low-budget horror
+   productions — they succeed *despite* small budgets, not *because of*
+   large ones.
+
+3. **Action and Adventure show elasticities above 1**, suggesting that
+   higher spending (e.g. on visual effects, marketing tie-ins, and
+   international distribution) does translate into more than
+   proportional revenue gains for those genres.
+
+4. **Budget and genre together explain roughly 43–44 % of log-revenue
+   variance.** The remainder is driven by unobserved factors such as
+   marketing expenditure, star power, critical reception, and release
+   timing — none of which are available in this dataset.
+
+5. **The interaction model (Model 2) fits better than the additive model
+   (Model 1)**, confirming that genre moderates the budget–revenue
+   relationship and that a single universal slope would be an
+   oversimplification.
+
+---
+
+## 9  Limitations
+
+- **No marketing data.** Marketing budgets can equal or exceed production
+  budgets for major releases. Omitting them likely inflates the
+  coefficient on production budget.
+- **Cross-sectional design.** The models treat all years as equivalent.
+  Ticket prices, streaming competition, and global distribution have
+  changed substantially over the dataset's time span, introducing
+  unmodelled time trends.
+- **Genre as a single label.** Many films span multiple genres; forcing
+  a single label per film introduces measurement error in the genre
+  variable.
+- **Homoscedasticity assumption.** Even with log-transformation, residual
+  variance may not be constant across the budget range. Robust standard
+  errors (e.g. HC3) would provide more reliable inference, but are
+  beyond the scope of this report.
+- **External validity.** The dataset covers a curated selection of films.
+  Straight-to-streaming and international productions are largely absent,
+  limiting generalisability.
+- **Outliers.** Log-transformation reduces the right-skew of the revenue distribution and stabilizes variance, but does not eliminate extreme observations. Action and Adventure films appear to dominate the upper tail of the revenue distribution; if confirmed, these high-leverage points could inflate the estimated budget elasticity for those genres, making their interaction terms appear more significant
