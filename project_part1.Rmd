@@ -206,28 +206,43 @@ knitr::kable(logic_table, caption = "Logical consistency checks")
 ## Estimate impact of removing rows with missing values or gross = 0
 
 ```{r}
-# Row-level missing values (NA or blank strings) across all columns
+# --- Row-level missingness -----------------------------------------------------
+# Before deciding on a cleaning strategy, we quantify how many rows would be
+# removed under different filters. This helps us assess the trade‑off between
+# data completeness and retaining sample size.
+
+# Rows that contain at least one missing value (NA or empty string) in any column.
 row_has_missing <- apply(movie_profit, 1, function(row) {
 	any(is.na(row) | trimws(as.character(row)) == "")
 })
 
-# Rows where either gross column is exactly zero
+# Rows where either domestic or worldwide gross is exactly zero.
+# Zero gross may indicate missing data, unreported figures, or films with no
+# theatrical release. For our analysis, we will exclude them because a log
+# transformation would be undefined for zero, and they do not represent
+# typical box-office behaviour.
 gross_is_zero <-
 	movie_profit$domestic_gross == 0 |
 	movie_profit$worldwide_gross == 0
 
+# Count overlaps and total rows that would be removed if we drop all such rows.
 overlap_count <- sum(row_has_missing & gross_is_zero)
 remove_all_count <- sum(row_has_missing | gross_is_zero)
 total_movies <- nrow(movie_profit)
 remove_all_pct <- round(100 * remove_all_count / total_movies, 2)
 
-# Same calculation, but ignore missing values in mpaa_rating
+# --- Alternative: ignore missing values in mpaa_rating -------------------------
+# The mpaa_rating column has a high proportion of missing values (as seen in
+# the missing summary). If we choose to keep rows with missing rating but
+# drop missing values elsewhere, we can retain more observations.
+# We compute the removal count under this relaxed rule.
 cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
 row_has_missing_no_rating <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
 
 remove_no_rating_count <- sum(row_has_missing_no_rating | gross_is_zero)
 remove_no_rating_pct <- round(100 * remove_no_rating_count / total_movies, 2)
 
+# --- Impact summary table ------------------------------------------------------
 impact_table <- data.frame(
 	metric = c(
 		"Rows with at least one missing value",
