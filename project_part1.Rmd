@@ -9,7 +9,7 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
-# ── Global chunk options ────────────────────────────────────────────────────────
+# --- Global chunk options ------------------------------------------------------
 # These settings apply to all code chunks in the document:
 #   • echo = FALSE      – hide R code from the rendered output
 #   • message/warning   – suppress package startup messages and warnings
@@ -30,7 +30,7 @@ knitr::opts_chunk$set(
 # Set the CRAN repository to avoid interactive prompts during package installation
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
-# ── Colour palette for genres ──────────────────────────────────────────────────
+# --- Colour palette for genres -------------------------------------------------
 # This named vector ensures that each genre always gets the same colour
 # across all plots, regardless of the order in which genres appear.
 # Any genre not listed here defaults to grey (#999999).
@@ -54,12 +54,20 @@ genre_color <- function(genres) {
 ## Load and verify the data
 
 ```{r}
+# -- Load required package ------------------------------------------------------
+# DT is used later for interactive tables (though not used in this part,
+# it is required for the overall project; we check its presence here.)
 if (!requireNamespace("DT", quietly = TRUE)) {
 	stop("Package 'DT' is required. Install it once with: install.packages('DT', repos = 'https://cloud.r-project.org')")
 }
 
+# -- Read the raw CSV file ------------------------------------------------------
+# The file is assumed to be in the working directory. We read it with
+# stringsAsFactors = FALSE to keep character columns as strings for now.
 movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
 
+# --- Basic dataset overview ----------------------------------------------------
+# Compute simple dimensions and column type counts to get a first impression.
 overview_table <- data.frame(
 	Metric = c("Rows", "Columns", "Numeric columns", "Character columns"),
 	Value = c(
