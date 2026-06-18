@@ -126,7 +126,9 @@ knitr::kable(conversion_table, caption = "release_date conversion summary")
 ## Check for missing values, duplicates, and logical consistency
 
 ```{r}
-# Missing values (NA or blank strings)
+# --- Missing values ------------------------------------------------------------
+# For character columns, we treat both NA and empty/whitespace-only strings
+# as missing. For numeric columns, only NA is considered missing.
 missing_count <- sapply(movie_profit, function(x) {
 	if (is.character(x)) {
 		sum(is.na(x) | trimws(x) == "")
@@ -143,11 +145,14 @@ missing_summary <- data.frame(
 	row.names = NULL
 )
 
-# Duplicate rows
+# --- Duplicate rows ------------------------------------------------------------
+# Check for exact duplicate rows; duplicates may arise from data entry errors.
 dup_rows <- duplicated(movie_profit)
 dup_count <- sum(dup_rows)
 
-# Numeric column checks
+# --- Numeric column consistency ------------------------------------------------
+# For the three financial columns, count negative values (should be none)
+# and zero values (which may indicate missing or unreported data).
 numeric_cols <- c("production_budget", "domestic_gross", "worldwide_gross")
 numeric_checks <- data.frame()
 for (col in numeric_cols) {
@@ -164,20 +169,23 @@ for (col in numeric_cols) {
 	}
 }
 
-# Logical consistency check
+# --- Logical consistency: worldwide_gross should be >= domestic_gross ----------
+# Since worldwide gross includes domestic, we expect no rows where
+# worldwide_gross < domestic_gross. Such rows would indicate data errors.
 bad_gross_count <- NA
 if (all(c("domestic_gross", "worldwide_gross") %in% names(movie_profit))) {
 	bad_gross_rows <- which(movie_profit$worldwide_gross < movie_profit$domestic_gross)
 	bad_gross_count <- length(bad_gross_rows)
 }
 
-# Date parsing check
+# --- Invalid dates after conversion (already computed, but shown again) --------
 bad_date_count <- sum(
 	is.na(movie_profit$release_date) &
 		!is.na(release_date_raw) &
 		trimws(release_date_raw) != ""
 )
 
+# --- Display all consistency tables --------------------------------------------
 knitr::kable(missing_summary, caption = "Missing values by variable")
 
 dup_table <- data.frame(
