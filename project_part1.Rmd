@@ -273,16 +273,29 @@ knitr::kable(impact_table, caption = "Impact of filtering rules")
 ## Remove rows with missing values (except rating) and gross = 0
 
 ```{r}
+# --- Apply cleaning rules ------------------------------------------------------
+# Based on the impact assessment, we choose to drop rows with:
+#   1) missing values in any column except mpaa_rating (i.e., we keep
+#      rows where only rating is missing), and
+#   2) domestic_gross or worldwide_gross equal to zero.
+#
+# This decision balances data quality with sample size, as mpaa_rating is
+# often missing but is not a critical variable for the main analyses.
+
 cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
 
+# Identify rows with missing values outside of mpaa_rating
 row_has_NA <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
 
+# Identify rows with zero gross
 gross_is_zero <-
 	movie_profit$domestic_gross == 0 |
 	movie_profit$worldwide_gross == 0
 
+# Keep only rows that pass both conditions
 movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
 
+# --- Cleaning summary ----------------------------------------------------------
 cleaning_table <- data.frame(
 	metric = c("Rows before cleaning", "Rows after cleaning", "Rows removed"),
 	count = c(nrow(movie_profit), nrow(movie_profit_clean), nrow(movie_profit) - nrow(movie_profit_clean))
