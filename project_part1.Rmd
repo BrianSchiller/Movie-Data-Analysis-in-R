@@ -102,9 +102,15 @@ knitr::kable(variable_overview, caption = "Variable types and first 5 values")
 ## Convert release_date to Date type and check conversion results
 
 ```{r}
+# --- Date conversion -----------------------------------------------------------
+# The release_date column is read as character in MM/DD/YYYY format.
+# We convert it to R's Date class using the appropriate format string.
 release_date_raw <- movie_profit$release_date
 movie_profit$release_date <- as.Date(release_date_raw, format = "%m/%d/%Y")
 
+# --- Conversion summary --------------------------------------------------------
+# Record the original and new classes, and count how many rows became NA
+# after conversion (i.e. were invalid dates).
 conversion_table <- data.frame(
 	metric = c("Original type", "New type", "Invalid dates after conversion"),
 	value = c(
