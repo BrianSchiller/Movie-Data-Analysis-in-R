@@ -1,0 +1,348 @@
+---
+title: "Movie Data Analysis — Part 4: Summary and Reflection"
+author: "TBD"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	comment = NA,
+	fig.align = "center",
+	fig.width = 10,
+	fig.height = 5,
+	out.width = "100%"
+)
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+```
+
+```{r load-and-clean, include=FALSE}
+# ── Data preparation (repeated from Part 1 so this file is self-contained) ──
+#
+# We reload the raw CSV and re-apply the cleaning rules established in
+# Part 1. Part 4 does not need the full set of derived columns from Part 2
+# or the models from Part 3 — it only needs the basic "before vs. after
+# cleaning" numbers so that the summary table at the end of this document
+# reports real, reproducible figures instead of numbers typed in by hand.
+
+movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+
+# Date conversion (same rule as Part 1)
+release_date_raw          <- movie_profit$release_date
+movie_profit$release_date <- as.Date(release_date_raw, format = "%m/%d/%Y")
+
+# Row-level filter (same rule as Part 1):
+#   • drop rows with any missing value outside of mpaa_rating
+#   • drop rows where domestic_gross or worldwide_gross equals zero
+cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
+row_has_NA         <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
+gross_is_zero      <- movie_profit$domestic_gross  == 0 |
+                      movie_profit$worldwide_gross == 0
+
+movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
+
+# A few headline numbers reused throughout the narrative below
+n_raw       <- nrow(movie_profit)
+n_clean     <- nrow(movie_profit_clean)
+n_removed   <- n_raw - n_clean
+pct_removed <- round(100 * n_removed / n_raw, 1)
+
+year_min <- format(min(movie_profit_clean$release_date, na.rm = TRUE), "%Y")
+year_max <- format(max(movie_profit_clean$release_date, na.rm = TRUE), "%Y")
+
+n_genres <- length(unique(movie_profit_clean$genre))
+```
+
+---
+
+## Overview
+
+This document covers **Part 4 — Summary and Reflection**, the closing
+part of the Movie Data Analysis project. Parts 1–3 did the technical
+work: cleaning the raw data, exploring it in depth, and building two
+statistical models to investigate how production budget and genre
+relate to worldwide box-office revenue, with a particular focus on the
+Horror vs. non-Horror comparison.
+
+This final part steps back from code and numbers and ties everything
+together. It is organised into five sections:
+
+1. **Project summary** — a concise recap of what was done in each part
+2. **Most important findings** — the key results from the EDA and the
+   models, brought together in one place
+3. **Main conclusions** — what these findings mean in practical terms
+4. **Limitations and difficulties** — what the data and models could
+   *not* tell us, and why
+5. **Reflection on the process** — what was hardest, what was most
+   interesting, and what we would do differently with more time,
+   knowledge, or resources
+
+---
+
+## 1  Project Summary
+
+The project worked with a dataset of `r n_raw` films spanning the five
+genres **Action, Adventure, Comedy, Drama, and Horror**, released
+between `r year_min` and `r year_max`. The work was carried out in four
+stages, each documented in its own part of the report.
+
+**Part 1 — Data cleaning and preparation.** The raw CSV was loaded and
+inspected for variable types, missing values, duplicates, and logical
+inconsistencies (e.g. `worldwide_gross` smaller than `domestic_gross`).
+`release_date` was converted from a text column to a proper `Date`. Rows
+with missing values in any column other than `mpaa_rating` (which was
+deliberately *kept*, since the rating is not needed for the core
+analysis and dropping it would have removed many otherwise-usable rows),
+or with a `domestic_gross`/`worldwide_gross` of exactly zero, were
+removed. This step removed `r n_removed` rows (`r pct_removed`% of the
+original data), leaving `r n_clean` films for analysis — a small enough
+fraction that the dataset's overall structure was not materially
+affected.
+
+**Part 2 — Exploratory data analysis (EDA).** Every original column was
+documented, and **12 new columns** were derived (above the required
+minimum of 10), including `international_gross`, two ROI factors
+(`roi_domestic_factor`, `roi_worldwide_factor`), two "top 100"
+blockbuster flags, the `is_horror_movie` / `movie_type` grouping
+variables, a `budget_band` categorical variable, two financial columns
+rescaled to thousands of dollars for the interactive table, and a
+formatted release date plus a `release_year` integer for time-series
+charts. **13 charts** were produced, each accompanied by a short
+explanation of why it was created and what it shows — covering genre
+and rating distributions, releases over time, distributor market share,
+and — most importantly — the Horror vs. non-Horror comparison across
+counts, ROI, and budget bands.
+
+**Part 3 — Modeling.** Building on the EDA, the research question *"Does
+a higher production budget lead to higher worldwide revenue, and does
+this relationship differ across genres?"* was formalised and tested with
+two nested linear regression models on log-transformed budget and
+revenue: **Model 1**, a main-effects model with a single budget slope
+for all genres, and **Model 2**, an interaction model allowing the
+budget slope (elasticity) to vary by genre. The two models were compared
+on goodness of fit, interpretability, and practical usefulness.
+
+**Part 4 — Summary and reflection.** Brings the threads
+from Parts 1–3 together, draws overall conclusions, and reflects honestly
+on the process — including what was difficult, what was interesting, and
+what we would change with more time or resources.
+
+---
+
+## 2  Most Important Findings
+
+### 2.1  What the exploratory analysis showed
+
+- **Low-budget Horror films achieve unusually high ROI.** Among the
+  cheapest Horror productions (budgets ≤ \$1M), several returned more
+  than 100× their production cost, and the large majority returned at
+  least 8× — a pattern not seen at the same scale in any other genre.
+- **This advantage is structural, not a handful of lucky outliers.**
+  Both the median ROI comparison and the budget-band distribution showed
+  that Horror consistently occupies a different financial "regime" from
+  Action, Adventure, Comedy, and Drama, even after accounting for
+  outliers.
+- **Bigger budgets do not help Horror the way they help other genres.**
+  The scatter of budget vs. revenue for low-budget films suggested that,
+  for Horror, spending more does not translate into proportionally more
+  revenue — a pattern that motivated the modelling question in Part 3.
+
+### 2.2  What the models showed
+
+- **Budget is a strong, statistically significant predictor of worldwide
+  revenue** for every genre (p < 2×10⁻¹⁶ in both models). On the
+  log–log scale, a 1% increase in budget is associated with roughly a
+  1% increase in revenue for most genres — close to a proportional
+  relationship.
+- **Horror is the clear outlier.** Its estimated budget elasticity
+  (≈ 0.68) is well below that of the reference genre Drama (≈ 0.97) and
+  below Comedy, Adventure, and Action, all of which showed elasticities
+  at or above 1. In plain terms: for Horror, an extra dollar of budget
+  buys noticeably less extra revenue than it does for other genres.
+- **The interaction model (Model 2) fits the data better than the
+  simpler main-effects model (Model 1)**, confirming that genre
+  *moderates* the budget–revenue relationship rather than just shifting
+  it up or down.
+- **Budget and genre together explain roughly 43–44% of the variance in
+  log-revenue** (adjusted R² ≈ 0.436 for the interaction model). This is
+  a meaningful share, but it also means more than half of the variation
+  in box-office revenue is driven by factors not captured in this
+  dataset.
+
+---
+
+## 3  Main Conclusions
+
+Putting the EDA and modelling results together, three practical
+conclusions stand out:
+
+1. **Low-budget Horror is a genuinely different segment of the film
+   industry, not just a curiosity.** Both the descriptive statistics and
+   the regression elasticities point the same direction: Horror films
+   can be extremely profitable *relative to their cost*, even though
+   they rarely achieve the largest absolute revenues. This explains why
+   there are so many cheap Horror productions — money is simply not the
+   main lever for this genre's success.
+
+2. **For most genres, "spend more to earn more" roughly holds — but not
+   universally.** Action, Adventure, and Comedy show budget elasticities
+   at or above 1, so increased investment is, on average, rewarded with
+   at least proportional revenue gains. Horror is the exception, which
+   has direct implications for how studios might think about
+   genre-specific investment strategy.
+
+3. **A single "one model fits all genres" view of the budget–revenue
+   relationship would be an oversimplification.** The interaction model
+   consistently outperformed the additive model, supporting the idea
+   that genre-aware models are more useful for anyone trying to use
+   budget as a lever for predicting or planning revenue.
+
+At the same time, the moderate R² values are a useful reminder that
+production budget and genre — while informative — are far from the whole
+story behind a film's box-office performance.
+
+---
+
+## 4  Limitations and Difficulties
+
+Several limitations affect how far these conclusions can be generalised:
+
+- **No marketing data.** Marketing spend can rival or exceed production
+  budgets for major releases. Its absence likely inflates the apparent
+  importance of the production budget coefficient, since some of
+  marketing's effect is probably being absorbed into the budget
+  variable.
+- **Cross-sectional treatment of a 1936–2018 time span.** The models
+  treat all years as equivalent, but ticket prices, inflation, streaming
+  competition, and global distribution patterns have changed enormously
+  over this period. A film's production budget and gross revenue are not
+  directly comparable across decades without some form of inflation
+  adjustment.
+- **Genre as a single label.** Many films could reasonably be classified
+  under more than one genre (e.g. an action-horror crossover), but the
+  dataset assigns exactly one genre per film. This introduces some
+  measurement error into the genre variable and, by extension, into the
+  genre-specific elasticities.
+- **Homoscedasticity assumption.** Even after the log transformation,
+  residual variance may not be perfectly constant across the budget
+  range. Robust standard errors (e.g. HC3) would give more reliable
+  inference but were outside the scope of this project.
+- **Missing `mpaa_rating` values.** `mpaa_rating` had a non-trivial
+  number of missing entries and was therefore excluded from the
+  row-completeness check in Part 1 (otherwise too many otherwise-usable
+  rows would have been dropped). As a result, it was used descriptively
+  in the EDA but not as a model predictor.
+- **External validity.** The dataset is a curated selection of
+  theatrically-released films. Straight-to-streaming releases,
+  international productions outside major US distribution, and very
+  recent films are largely absent, which limits how far these findings
+  can be extended to "the movie industry" as a whole today.
+
+---
+
+## 5  Reflection on the Process
+
+### 5.1  What was the most difficult part of the project?
+
+The most challenging stage was the transition between **EDA and
+modelling** — specifically, deciding *how* to formalise the pattern
+spotted during EDA (cheap Horror films with huge ROI) into a model that
+was both statistically sound and easy to interpret. Working on the
+log–log scale made the elasticity interpretation cleaner, but it also
+required being careful about strictly-positive values, choosing a
+sensible reference genre, and explaining what an "elasticity" actually
+means in terms a non-statistician would understand. Cleaning decisions
+in Part 1 — particularly how to handle the missing `mpaa_rating` values
+without discarding a large share of the dataset — also took more
+iteration than expected, since every cleaning choice had knock-on
+effects for the row counts reported throughout the rest of the report.
+
+### 5.2  What was the most interesting part?
+
+The most interesting moment was seeing the **Horror anomaly confirmed
+statistically** after first noticing it informally during EDA. It is one
+thing to see a handful of cheap Horror films with very high ROI in a
+table; it is more convincing to see the same pattern show up as a
+significantly lower budget elasticity in a regression model, controlling
+for budget itself. Connecting a simple, intuitive observation
+("cheap Horror movies seem to do really well relative to their cost")
+to a formal statistical result was the most rewarding part of the
+project.
+
+### 5.3  What would we do differently if we started again?
+
+If starting again, it would help to **plan the derived columns and the
+research question earlier and together**, rather than designing the
+EDA columns first and only formulating the modelling question afterwards.
+A few of the columns created in Part 2 (e.g. the "top 100" blockbuster
+flags) ended up being more useful for exploration than for the final
+models. Sketching the modelling question at the start — even in a rough
+form — would have made it easier to design derived columns that serve
+both the EDA *and* the modelling stage, and would have reduced some
+duplicated logic between Parts 2 and 3.
+
+### 5.4  What would we improve with more time, knowledge, or resources?
+
+With more time, knowledge, or data, the analysis could be extended in
+several useful directions:
+
+- **Add marketing budget data** (even an approximate figure) to separate
+  the effect of production spending from promotional spending.
+- **Adjust monetary values for inflation**, so that budgets and revenues
+  from 1936 and 2018 are genuinely comparable, and consider adding
+  release year as a covariate or fitting separate models by decade.
+- **Allow multiple genre tags per film** instead of a single label, to
+  reduce measurement error in the genre variable.
+- **Use robust standard errors** (e.g. HC3) to make the significance
+  tests more reliable in the presence of heteroscedasticity.
+- **Try additional modelling approaches**, such as quantile regression
+  to model the *spread* of ROI outcomes (not just the average), or a
+  tree-based model (e.g. random forest) to explore non-linear
+  interactions and rank predictor importance without assuming a log-log
+  functional form in advance.
+
+---
+
+## 6  Project at a Glance
+
+The table below summarises the project's headline numbers in one place.
+The dataset-derived figures (rows, genres, years) are computed live from
+the cleaned data so that they always stay in sync with Part 1; the
+remaining rows describe the scope of the analytical work carried out in
+Parts 2 and 3.
+
+```{r project-at-a-glance}
+glance_table <- data.frame(
+	metric = c(
+		"Films in raw dataset",
+		"Films after cleaning (Part 1)",
+		"Rows removed during cleaning",
+		"Percent of rows removed",
+		"Genres analysed",
+		"Years covered (cleaned data)",
+		"New derived columns created (Part 2)",
+		"Charts created (Part 2)",
+		"Statistical models built (Part 3)"
+	),
+	value = c(
+		n_raw,
+		n_clean,
+		n_removed,
+		paste0(pct_removed, "%"),
+		paste(sort(unique(movie_profit_clean$genre)), collapse = ", "),
+		paste0(year_min, "\u2013", year_max),
+		"12 (minimum required: 10)",
+		"13 (minimum required: 10)",
+		"2 (main-effects and interaction linear regression)"
+	)
+)
+
+knitr::kable(glance_table, caption = "Project at a glance")
+```
