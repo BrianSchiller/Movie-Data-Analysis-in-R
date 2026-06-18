@@ -84,6 +84,9 @@ knitr::kable(overview_table, caption = "Dataset overview")
 ## Check variable types and first 5 values
 
 ```{r}
+# --- Inspect each variable's type and first few values -------------------------
+# This helps to quickly identify columns that may need conversion (e.g. dates)
+# and to detect any obvious formatting issues.
 variable_overview <- data.frame(
 	variable = names(movie_profit),
 	type = sapply(movie_profit, function(x) class(x)[1]),
