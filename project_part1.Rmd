@@ -1,5 +1,5 @@
 ---
-title: "Movie Data Analysis"
+title: "Movie Data Analysis - Part 1: Data Cleaning and Preparation"
 author: "TBD"
 date: "`r Sys.Date()`"
 output: html_document
@@ -11,11 +11,11 @@ editor_options:
 ```{r setup, include=FALSE}
 # --- Global chunk options ------------------------------------------------------
 # These settings apply to all code chunks in the document:
-#   • echo = FALSE      – hide R code from the rendered output
-#   • message/warning   – suppress package startup messages and warnings
-#   • comment = NA      – remove the leading "##" from console output
-#   • fig.align/width   – centre figures and set a consistent size
-#   • out.width = 100%  – make figures scale to the page width
+#   - echo = FALSE      – hide R code from the rendered output
+#   - message/warning   – suppress package startup messages and warnings
+#   - comment = NA      – remove the leading "##" from console output
+#   - fig.align/width   – centre figures and set a consistent size
+#   - out.width = 100%  – make figures scale to the page width
 knitr::opts_chunk$set(
 	echo = FALSE,
 	message = FALSE,
@@ -65,6 +65,11 @@ if (!requireNamespace("DT", quietly = TRUE)) {
 # The file is assumed to be in the working directory. We read it with
 # stringsAsFactors = FALSE to keep character columns as strings for now.
 movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+# This makes missingness uniform across the whole dataset.
+char_cols <- sapply(movie_profit, is.character)
+movie_profit[char_cols] <- lapply(movie_profit[char_cols], function(x) {
+  ifelse(trimws(x) == "", NA_character_, x)
+})
 
 # --- Basic dataset overview ----------------------------------------------------
 # Compute simple dimensions and column type counts to get a first impression.
@@ -127,22 +132,13 @@ knitr::kable(conversion_table, caption = "release_date conversion summary")
 
 ```{r}
 # --- Missing values ------------------------------------------------------------
-# For character columns, we treat both NA and empty/whitespace-only strings
-# as missing. For numeric columns, only NA is considered missing.
-missing_count <- sapply(movie_profit, function(x) {
-	if (is.character(x)) {
-		sum(is.na(x) | trimws(x) == "")
-	} else {
-		sum(is.na(x))
-	}
-})
-
-missing_pct <- round(100 * missing_count / nrow(movie_profit), 2)
+missing_count <- colSums(is.na(movie_profit))
+missing_pct   <- round(100 * missing_count / nrow(movie_profit), 2)
 missing_summary <- data.frame(
-	variable = names(missing_count),
-	missing_count = as.integer(missing_count),
-	missing_percent = missing_pct,
-	row.names = NULL
+  variable = names(missing_count),
+  missing_count = as.integer(missing_count),
+  missing_percent = missing_pct,
+  row.names = NULL
 )
 
 # --- Duplicate rows ------------------------------------------------------------
@@ -154,20 +150,13 @@ dup_count <- sum(dup_rows)
 # For the three financial columns, count negative values (should be none)
 # and zero values (which may indicate missing or unreported data).
 numeric_cols <- c("production_budget", "domestic_gross", "worldwide_gross")
-numeric_checks <- data.frame()
-for (col in numeric_cols) {
-	if (col %in% names(movie_profit)) {
-		x <- movie_profit[[col]]
-		numeric_checks <- rbind(
-			numeric_checks,
-			data.frame(
-				variable = col,
-				negative_values = sum(x < 0, na.rm = TRUE),
-				zero_values = sum(x == 0, na.rm = TRUE)
-			)
-		)
-	}
-}
+neg_counts <- vapply(movie_profit[numeric_cols], function(x) sum(x < 0, na.rm = TRUE), integer(1))
+zero_counts <- vapply(movie_profit[numeric_cols], function(x) sum(x == 0, na.rm = TRUE), integer(1))
+numeric_checks <- data.frame(
+  variable = numeric_cols,
+  negative_values = neg_counts,
+  zero_values = zero_counts
+)
 
 # --- Logical consistency: worldwide_gross should be >= domestic_gross ----------
 # Since worldwide gross includes domestic, we expect no rows where
