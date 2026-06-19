@@ -1,5 +1,5 @@
 ---
-title: "Movie Data Analysis"
+title: "Movie Data Analysis - Part 1: Data Cleaning and Preparation"
 author: "TBD"
 date: "`r Sys.Date()`"
 output: html_document
@@ -9,6 +9,13 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
+# --- Global chunk options ------------------------------------------------------
+# These settings apply to all code chunks in the document:
+#   - echo = FALSE      – hide R code from the rendered output
+#   - message/warning   – suppress package startup messages and warnings
+#   - comment = NA      – remove the leading "##" from console output
+#   - fig.align/width   – centre figures and set a consistent size
+#   - out.width = 100%  – make figures scale to the page width
 knitr::opts_chunk$set(
 	echo = FALSE,
 	message = FALSE,
@@ -20,8 +27,13 @@ knitr::opts_chunk$set(
 	out.width = "100%"
 )
 
+# Set the CRAN repository to avoid interactive prompts during package installation
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
+# --- Colour palette for genres -------------------------------------------------
+# This named vector ensures that each genre always gets the same colour
+# across all plots, regardless of the order in which genres appear.
+# Any genre not listed here defaults to grey (#999999).
 genre_palette <- c(
 	Action = "#1f77b4",
 	Adventure = "#ff7f0e",
@@ -30,6 +42,8 @@ genre_palette <- c(
 	Horror = "#d62728"
 )
 
+# Helper function: maps a vector of genre names to the corresponding palette
+# colour; unknown genres are assigned a neutral grey.
 genre_color <- function(genres) {
 	colors <- genre_palette[as.character(genres)]
 	colors[is.na(colors)] <- "#999999"
@@ -40,12 +54,25 @@ genre_color <- function(genres) {
 ## Load and verify the data
 
 ```{r}
+# -- Load required package ------------------------------------------------------
+# DT is used later for interactive tables (though not used in this part,
+# it is required for the overall project; we check its presence here.)
 if (!requireNamespace("DT", quietly = TRUE)) {
 	stop("Package 'DT' is required. Install it once with: install.packages('DT', repos = 'https://cloud.r-project.org')")
 }
 
+# -- Read the raw CSV file ------------------------------------------------------
+# The file is assumed to be in the working directory. We read it with
+# stringsAsFactors = FALSE to keep character columns as strings for now.
 movie_profit <- read.csv("movie_profit.csv", stringsAsFactors = FALSE)
+# This makes missingness uniform across the whole dataset.
+char_cols <- sapply(movie_profit, is.character)
+movie_profit[char_cols] <- lapply(movie_profit[char_cols], function(x) {
+  ifelse(trimws(x) == "", NA_character_, x)
+})
 
+# --- Basic dataset overview ----------------------------------------------------
+# Compute simple dimensions and column type counts to get a first impression.
 overview_table <- data.frame(
 	Metric = c("Rows", "Columns", "Numeric columns", "Character columns"),
 	Value = c(
@@ -62,6 +89,9 @@ knitr::kable(overview_table, caption = "Dataset overview")
 ## Check variable types and first 5 values
 
 ```{r}
+# --- Inspect each variable's type and first few values -------------------------
+# This helps to quickly identify columns that may need conversion (e.g. dates)
+# and to detect any obvious formatting issues.
 variable_overview <- data.frame(
 	variable = names(movie_profit),
 	type = sapply(movie_profit, function(x) class(x)[1]),
@@ -77,9 +107,15 @@ knitr::kable(variable_overview, caption = "Variable types and first 5 values")
 ## Convert release_date to Date type and check conversion results
 
 ```{r}
+# --- Date conversion -----------------------------------------------------------
+# The release_date column is read as character in MM/DD/YYYY format.
+# We convert it to R's Date class using the appropriate format string.
 release_date_raw <- movie_profit$release_date
 movie_profit$release_date <- as.Date(release_date_raw, format = "%m/%d/%Y")
 
+# --- Conversion summary --------------------------------------------------------
+# Record the original and new classes, and count how many rows became NA
+# after conversion (i.e. were invalid dates).
 conversion_table <- data.frame(
 	metric = c("Original type", "New type", "Invalid dates after conversion"),
 	value = c(
@@ -95,58 +131,50 @@ knitr::kable(conversion_table, caption = "release_date conversion summary")
 ## Check for missing values, duplicates, and logical consistency
 
 ```{r}
-# Missing values (NA or blank strings)
-missing_count <- sapply(movie_profit, function(x) {
-	if (is.character(x)) {
-		sum(is.na(x) | trimws(x) == "")
-	} else {
-		sum(is.na(x))
-	}
-})
-
-missing_pct <- round(100 * missing_count / nrow(movie_profit), 2)
+# --- Missing values ------------------------------------------------------------
+missing_count <- colSums(is.na(movie_profit))
+missing_pct   <- round(100 * missing_count / nrow(movie_profit), 2)
 missing_summary <- data.frame(
-	variable = names(missing_count),
-	missing_count = as.integer(missing_count),
-	missing_percent = missing_pct,
-	row.names = NULL
+  variable = names(missing_count),
+  missing_count = as.integer(missing_count),
+  missing_percent = missing_pct,
+  row.names = NULL
 )
 
-# Duplicate rows
+# --- Duplicate rows ------------------------------------------------------------
+# Check for exact duplicate rows; duplicates may arise from data entry errors.
 dup_rows <- duplicated(movie_profit)
 dup_count <- sum(dup_rows)
 
-# Numeric column checks
+# --- Numeric column consistency ------------------------------------------------
+# For the three financial columns, count negative values (should be none)
+# and zero values (which may indicate missing or unreported data).
 numeric_cols <- c("production_budget", "domestic_gross", "worldwide_gross")
-numeric_checks <- data.frame()
-for (col in numeric_cols) {
-	if (col %in% names(movie_profit)) {
-		x <- movie_profit[[col]]
-		numeric_checks <- rbind(
-			numeric_checks,
-			data.frame(
-				variable = col,
-				negative_values = sum(x < 0, na.rm = TRUE),
-				zero_values = sum(x == 0, na.rm = TRUE)
-			)
-		)
-	}
-}
+neg_counts <- vapply(movie_profit[numeric_cols], function(x) sum(x < 0, na.rm = TRUE), integer(1))
+zero_counts <- vapply(movie_profit[numeric_cols], function(x) sum(x == 0, na.rm = TRUE), integer(1))
+numeric_checks <- data.frame(
+  variable = numeric_cols,
+  negative_values = neg_counts,
+  zero_values = zero_counts
+)
 
-# Logical consistency check
+# --- Logical consistency: worldwide_gross should be >= domestic_gross ----------
+# Since worldwide gross includes domestic, we expect no rows where
+# worldwide_gross < domestic_gross. Such rows would indicate data errors.
 bad_gross_count <- NA
 if (all(c("domestic_gross", "worldwide_gross") %in% names(movie_profit))) {
 	bad_gross_rows <- which(movie_profit$worldwide_gross < movie_profit$domestic_gross)
 	bad_gross_count <- length(bad_gross_rows)
 }
 
-# Date parsing check
+# --- Invalid dates after conversion (already computed, but shown again) --------
 bad_date_count <- sum(
 	is.na(movie_profit$release_date) &
 		!is.na(release_date_raw) &
 		trimws(release_date_raw) != ""
 )
 
+# --- Display all consistency tables --------------------------------------------
 knitr::kable(missing_summary, caption = "Missing values by variable")
 
 dup_table <- data.frame(
@@ -167,28 +195,43 @@ knitr::kable(logic_table, caption = "Logical consistency checks")
 ## Estimate impact of removing rows with missing values or gross = 0
 
 ```{r}
-# Row-level missing values (NA or blank strings) across all columns
+# --- Row-level missingness -----------------------------------------------------
+# Before deciding on a cleaning strategy, we quantify how many rows would be
+# removed under different filters. This helps us assess the trade‑off between
+# data completeness and retaining sample size.
+
+# Rows that contain at least one missing value (NA or empty string) in any column.
 row_has_missing <- apply(movie_profit, 1, function(row) {
 	any(is.na(row) | trimws(as.character(row)) == "")
 })
 
-# Rows where either gross column is exactly zero
+# Rows where either domestic or worldwide gross is exactly zero.
+# Zero gross may indicate missing data, unreported figures, or films with no
+# theatrical release. For our analysis, we will exclude them because a log
+# transformation would be undefined for zero, and they do not represent
+# typical box-office behaviour.
 gross_is_zero <-
 	movie_profit$domestic_gross == 0 |
 	movie_profit$worldwide_gross == 0
 
+# Count overlaps and total rows that would be removed if we drop all such rows.
 overlap_count <- sum(row_has_missing & gross_is_zero)
 remove_all_count <- sum(row_has_missing | gross_is_zero)
 total_movies <- nrow(movie_profit)
 remove_all_pct <- round(100 * remove_all_count / total_movies, 2)
 
-# Same calculation, but ignore missing values in mpaa_rating
+# --- Alternative: ignore missing values in mpaa_rating -------------------------
+# The mpaa_rating column has a high proportion of missing values (as seen in
+# the missing summary). If we choose to keep rows with missing rating but
+# drop missing values elsewhere, we can retain more observations.
+# We compute the removal count under this relaxed rule.
 cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
 row_has_missing_no_rating <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
 
 remove_no_rating_count <- sum(row_has_missing_no_rating | gross_is_zero)
 remove_no_rating_pct <- round(100 * remove_no_rating_count / total_movies, 2)
 
+# --- Impact summary table ------------------------------------------------------
 impact_table <- data.frame(
 	metric = c(
 		"Rows with at least one missing value",
@@ -219,16 +262,29 @@ knitr::kable(impact_table, caption = "Impact of filtering rules")
 ## Remove rows with missing values (except rating) and gross = 0
 
 ```{r}
+# --- Apply cleaning rules ------------------------------------------------------
+# Based on the impact assessment, we choose to drop rows with:
+#   1) missing values in any column except mpaa_rating (i.e., we keep
+#      rows where only rating is missing), and
+#   2) domestic_gross or worldwide_gross equal to zero.
+#
+# This decision balances data quality with sample size, as mpaa_rating is
+# often missing but is not a critical variable for the main analyses.
+
 cols_except_rating <- setdiff(names(movie_profit), "mpaa_rating")
 
+# Identify rows with missing values outside of mpaa_rating
 row_has_NA <- !complete.cases(movie_profit[, cols_except_rating, drop = FALSE])
 
+# Identify rows with zero gross
 gross_is_zero <-
 	movie_profit$domestic_gross == 0 |
 	movie_profit$worldwide_gross == 0
 
+# Keep only rows that pass both conditions
 movie_profit_clean <- movie_profit[!(row_has_NA | gross_is_zero), ]
 
+# --- Cleaning summary ----------------------------------------------------------
 cleaning_table <- data.frame(
 	metric = c("Rows before cleaning", "Rows after cleaning", "Rows removed"),
 	count = c(nrow(movie_profit), nrow(movie_profit_clean), nrow(movie_profit) - nrow(movie_profit_clean))
