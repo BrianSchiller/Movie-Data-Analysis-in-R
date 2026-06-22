@@ -446,19 +446,6 @@ movie_profit_enriched$release_date_fmt <-
 
 movie_profit_enriched$release_year <-
 	as.integer(format(movie_profit_enriched$release_date, "%Y"))
-
-# ── Preview ───────────────────────────────────────────────────────────────────
-preview_cols <- c(
-	"movie", "production_budget", "domestic_gross", "worldwide_gross",
-	"international_gross", "roi_domestic_factor", "roi_worldwide_factor",
-	"top100_domestic_gross", "top100_international_gross",
-	"is_horror_movie", "movie_type", "budget_band"
-)
-
-knitr::kable(
-	head(movie_profit_enriched[, preview_cols], 6),
-	caption = "Preview of the 12 newly derived columns (first 6 rows)"
-)
 ```
 
 **Summary of new columns**
@@ -477,6 +464,29 @@ knitr::kable(
 | 10 | `domestic_gross_k` | numeric | Domestic gross in thousands USD |
 | 11 | `worldwide_gross_k` | numeric | Worldwide gross in thousands USD |
 | 12 | `release_year` | integer | Calendar year of release |
+
+``` {r column-preview}
+# ── Preview ───────────────────────────────────────────────────────────────────
+preview_cols <- c(
+	"movie",
+	"international_gross", "roi_domestic_factor", "roi_worldwide_factor",
+	"top100_domestic_gross", "top100_international_gross",
+	"is_horror_movie", "movie_type", "budget_band", "production_budget_k", "release_year"
+)
+
+preview_headers <- c(
+	"Movie",
+	"Intl. Gross", "ROI Dom.", "ROI World.",
+	"Top 100 Dom.", "Top 100 Intl.",
+	"Horror?", "Type", "Budget Band", "Prod. Bud. (K)", "Year"
+)
+
+knitr::kable(
+	head(movie_profit_enriched[, preview_cols], 6),
+	col.names = preview_headers,
+	caption = "Preview of the 12 newly derived columns (first 6 rows)"
+)
+```
 
 ------------------------------------------------------------------------
 
