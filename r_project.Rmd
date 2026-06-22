@@ -1384,7 +1384,7 @@ par(old_par)
 
 ------------------------------------------------------------------------
 
-## 5 Key findings from EDA
+## 3 Key findings from EDA
 
 The exploratory analysis surfaces three main findings that will motivate
 the modelling in Part 3:
@@ -1394,12 +1394,9 @@ the modelling in Part 3:
     very little to produce (often \< \$1M) but earned tens or hundreds
     of millions at the box office.
 
-2.  **Horror's ROI advantage is structural, not incidental.** Both the
-    median ROI comparison (Chart 8) and the budget-band distribution
+2.  **Horror movies can be produced very cheapley** The budget-band distribution
     (Chart 13) confirm that Horror operates in a different financial
-    regime from Action, Adventure, and Drama. Even after removing
-    outliers, the typical Horror film returns more per dollar of
-    production investment than its non-Horror counterpart.
+    area than Action, Adventure, and Drama.
 
 3.  **Higher budgets help most genres but not Horror as much.** The
     interactive table and Chart 12 suggest that increasing the budget of
