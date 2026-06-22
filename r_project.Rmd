@@ -647,6 +647,86 @@ cat_table <- do.call(rbind, lapply(categorical_vars, function(v) {
 }))
 names(cat_table) <- c("Variable", "Unique levels", "Most common", "Count")
 styled_kable(cat_table, caption = "Summary of categorical variables")
+
+
+compare_data <- movie_profit_enriched
+
+# Helper: count IQR-based outliers in a numeric vector
+count_iqr_outliers <- function(x) {
+	x <- x[!is.na(x)]
+	if (length(x) < 4) return(0)
+	q1  <- quantile(x, 0.25)
+	q3  <- quantile(x, 0.75)
+	iqr <- q3 - q1
+	sum(x < (q1 - 1.5 * iqr) | x > (q3 + 1.5 * iqr))
+}
+
+# Build summary for each group
+build_group_stats <- function(flag) {
+	d <- compare_data[flag, ]
+	c(
+		movie_count            = sum(flag),
+		budget_mean            = round(mean(d$production_budget,   na.rm = TRUE), 2),
+		budget_q1              = round(quantile(d$production_budget,   0.25, na.rm = TRUE), 2),
+		budget_median          = round(median(d$production_budget,  na.rm = TRUE), 2),
+		budget_q3              = round(quantile(d$production_budget,   0.75, na.rm = TRUE), 2),
+		worldwide_mean         = round(mean(d$worldwide_gross,     na.rm = TRUE), 2),
+		worldwide_q1           = round(quantile(d$worldwide_gross,     0.25, na.rm = TRUE), 2),
+		worldwide_median       = round(median(d$worldwide_gross,   na.rm = TRUE), 2),
+		worldwide_q3           = round(quantile(d$worldwide_gross,     0.75, na.rm = TRUE), 2),
+		roi_domestic_mean      = round(mean(d$roi_domestic_factor, na.rm = TRUE), 2),
+		roi_domestic_q1        = round(quantile(d$roi_domestic_factor, 0.25, na.rm = TRUE), 2),
+		roi_domestic_median    = round(median(d$roi_domestic_factor, na.rm = TRUE), 2),
+		roi_domestic_q3        = round(quantile(d$roi_domestic_factor, 0.75, na.rm = TRUE), 2),
+		roi_domestic_outliers  = count_iqr_outliers(d$roi_domestic_factor),
+		roi_worldwide_mean     = round(mean(d$roi_worldwide_factor, na.rm = TRUE), 2),
+		roi_worldwide_q1       = round(quantile(d$roi_worldwide_factor, 0.25, na.rm = TRUE), 2),
+		roi_worldwide_median   = round(median(d$roi_worldwide_factor, na.rm = TRUE), 2),
+		roi_worldwide_q3       = round(quantile(d$roi_worldwide_factor, 0.75, na.rm = TRUE), 2),
+		roi_worldwide_outliers = count_iqr_outliers(d$roi_worldwide_factor)
+	)
+}
+
+horror_stats     <- build_group_stats(compare_data$is_horror_movie)
+non_horror_stats <- build_group_stats(!compare_data$is_horror_movie)
+
+pretty_metric_names <- c(
+	"movie_count"            = "Movie count",
+	"budget_mean"            = "Production budget (mean)",
+	"budget_q1.25%"          = "Production budget (Q1)",
+	"budget_median"          = "Production budget (median)",
+	"budget_q3.75%"          = "Production budget (Q3)",
+	"worldwide_mean"         = "Worldwide gross (mean)",
+	"worldwide_q1.25%"       = "Worldwide gross (Q1)",
+	"worldwide_median"       = "Worldwide gross (median)",
+	"worldwide_q3.75%"       = "Worldwide gross (Q3)",
+	"roi_domestic_mean"      = "Domestic ROI (mean)",
+	"roi_domestic_q1.25%"    = "Domestic ROI (Q1)",
+	"roi_domestic_median"    = "Domestic ROI (median)",
+	"roi_domestic_q3.75%"    = "Domestic ROI (Q3)",
+	"roi_domestic_outliers"  = "Domestic ROI (outliers)",
+	"roi_worldwide_mean"     = "Worldwide ROI (mean)",
+	"roi_worldwide_q1.25%"   = "Worldwide ROI (Q1)",
+	"roi_worldwide_median"   = "Worldwide ROI (median)",
+	"roi_worldwide_q3.75%"   = "Worldwide ROI (Q3)",
+	"roi_worldwide_outliers" = "Worldwide ROI (outliers)"
+)
+
+summary_table <- data.frame(
+	metric      = ifelse(names(horror_stats) %in% names(pretty_metric_names),
+	              pretty_metric_names[names(horror_stats)],
+	              names(horror_stats)),
+	Horror      = unname(horror_stats),
+	`Non-horror` = unname(non_horror_stats),
+	check.names = FALSE
+)
+
+for (col in c("Horror", "Non-horror")) {
+	summary_table[[col]] <- format(summary_table[[col]],
+	    big.mark = ",", scientific = FALSE, trim = TRUE)
+}
+
+styled_kable(summary_table, caption = "Horror vs. Non-horror — key financial metrics")
 ```
 
 ------------------------------------------------------------------------
@@ -779,73 +859,6 @@ barplot(
 	main      = "Chart 4 — Top 10 Distributors by Number of Movies",
 	ylab      = "Number of Movies"
 )
-```
-
-------------------------------------------------------------------------
-
-### Descriptive comparison: Horror vs. Non-horror
-
-Before plotting trends we summarise the key financial metrics for both
-groups side by side. Horror films have notably lower median production
-budgets than non-horror films but comparable (and sometimes superior)
-median ROI — a pattern we will explore in depth in the charts that
-follow.
-
-```{r horror-summary-table}
-compare_data <- movie_profit_enriched
-
-# Helper: count IQR-based outliers in a numeric vector
-count_iqr_outliers <- function(x) {
-	x <- x[!is.na(x)]
-	if (length(x) < 4) return(0)
-	q1  <- quantile(x, 0.25)
-	q3  <- quantile(x, 0.75)
-	iqr <- q3 - q1
-	sum(x < (q1 - 1.5 * iqr) | x > (q3 + 1.5 * iqr))
-}
-
-# Build summary for each group
-build_group_stats <- function(flag) {
-	d <- compare_data[flag, ]
-	c(
-		movie_count            = sum(flag),
-		budget_mean            = round(mean(d$production_budget,   na.rm = TRUE), 2),
-		budget_q1              = round(quantile(d$production_budget,   0.25, na.rm = TRUE), 2),
-		budget_median          = round(median(d$production_budget,  na.rm = TRUE), 2),
-		budget_q3              = round(quantile(d$production_budget,   0.75, na.rm = TRUE), 2),
-		worldwide_mean         = round(mean(d$worldwide_gross,     na.rm = TRUE), 2),
-		worldwide_q1           = round(quantile(d$worldwide_gross,     0.25, na.rm = TRUE), 2),
-		worldwide_median       = round(median(d$worldwide_gross,   na.rm = TRUE), 2),
-		worldwide_q3           = round(quantile(d$worldwide_gross,     0.75, na.rm = TRUE), 2),
-		roi_domestic_mean      = round(mean(d$roi_domestic_factor, na.rm = TRUE), 2),
-		roi_domestic_q1        = round(quantile(d$roi_domestic_factor, 0.25, na.rm = TRUE), 2),
-		roi_domestic_median    = round(median(d$roi_domestic_factor, na.rm = TRUE), 2),
-		roi_domestic_q3        = round(quantile(d$roi_domestic_factor, 0.75, na.rm = TRUE), 2),
-		roi_domestic_outliers  = count_iqr_outliers(d$roi_domestic_factor),
-		roi_worldwide_mean     = round(mean(d$roi_worldwide_factor, na.rm = TRUE), 2),
-		roi_worldwide_q1       = round(quantile(d$roi_worldwide_factor, 0.25, na.rm = TRUE), 2),
-		roi_worldwide_median   = round(median(d$roi_worldwide_factor, na.rm = TRUE), 2),
-		roi_worldwide_q3       = round(quantile(d$roi_worldwide_factor, 0.75, na.rm = TRUE), 2),
-		roi_worldwide_outliers = count_iqr_outliers(d$roi_worldwide_factor)
-	)
-}
-
-horror_stats     <- build_group_stats(compare_data$is_horror_movie)
-non_horror_stats <- build_group_stats(!compare_data$is_horror_movie)
-
-summary_table <- data.frame(
-	metric      = names(horror_stats),
-	Horror      = unname(horror_stats),
-	`Non-horror` = unname(non_horror_stats),
-	check.names = FALSE
-)
-
-for (col in c("Horror", "Non-horror")) {
-	summary_table[[col]] <- format(summary_table[[col]],
-	                               big.mark = ",", scientific = FALSE, trim = TRUE)
-}
-
-knitr::kable(summary_table, caption = "Horror vs. Non-horror — key financial metrics")
 ```
 
 ------------------------------------------------------------------------
