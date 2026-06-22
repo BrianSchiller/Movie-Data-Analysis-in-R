@@ -506,6 +506,15 @@ numeric_vars     <- names(analysis_data)[sapply(analysis_data, is.numeric)]
 numeric_vars     <- setdiff(numeric_vars, "X")
 categorical_vars <- intersect(c("genre", "mpaa_rating", "distributor"), names(analysis_data))
 
+# Shared styling for the tables in this section.
+table_class <- 'class="table table-striped table-hover table-sm report-table"'
+
+styled_kable <- function(x, caption) {
+	knitr::asis_output(
+		knitr::kable(x, format = "html", caption = caption, table.attr = table_class)
+	)
+}
+
 # ── Dataset profile ───────────────────────────────────────────────────────────
 release_dates <- analysis_data$release_date
 profile_table <- data.frame(
@@ -524,12 +533,27 @@ profile_table <- data.frame(
 	),
 	stringsAsFactors = FALSE
 )
-knitr::kable(profile_table, caption = "Analysis dataset profile")
+styled_kable(profile_table, caption = "Analysis dataset profile")
 
 # ── Five-number summary for numeric columns ───────────────────────────────────
+summary_vars <- setdiff(
+	numeric_vars,
+	c("production_budget_k", "domestic_gross_k", "worldwide_gross_k")
+)
+
+pretty_var_names <- c(
+	production_budget = "Production budget",
+	domestic_gross = "Domestic gross",
+	worldwide_gross = "Worldwide gross",
+	international_gross = "International gross",
+	roi_domestic_factor = "Domestic ROI",
+	roi_worldwide_factor = "Worldwide ROI",
+	release_year = "Release year"
+)
+
 num_summary_mat <- do.call(
 	cbind,
-	lapply(analysis_data[, numeric_vars, drop = FALSE], summary)
+	lapply(analysis_data[, summary_vars, drop = FALSE], summary)
 )
 num_summary <- data.frame(
 	statistic   = rownames(num_summary_mat),
@@ -537,7 +561,24 @@ num_summary <- data.frame(
 	row.names   = NULL,
 	check.names = FALSE
 )
-for (col in numeric_vars) {
+pretty_summary_names <- c(
+	statistic = "Statistic",
+	production_budget = "Production budget",
+	domestic_gross = "Domestic gross",
+	worldwide_gross = "Worldwide gross",
+	international_gross = "International gross",
+	roi_domestic_factor = "Domestic ROI",
+	roi_worldwide_factor = "Worldwide ROI",
+	release_year = "Release year"
+)
+
+colnames(num_summary) <- unname(ifelse(
+	names(num_summary) %in% names(pretty_summary_names),
+	pretty_summary_names[names(num_summary)],
+	tools::toTitleCase(gsub("_", " ", names(num_summary)))
+))
+
+for (col in names(num_summary)[-1]) {
 	num_summary[[col]] <- format(
 		round(as.numeric(num_summary[[col]]), 2),
 		big.mark   = ",",
@@ -545,33 +586,26 @@ for (col in numeric_vars) {
 		trim       = TRUE
 	)
 }
-print(knitr::kable(num_summary, caption = "Five-number summary (numeric variables)"))
-
-# ── Mean vs median ────────────────────────────────────────────────────────────
-# Large gaps between mean and median signal skewed distributions / outliers.
-mean_median_table <- data.frame(
-	variable = numeric_vars,
-	mean     = round(sapply(analysis_data[, numeric_vars, drop = FALSE], mean,   na.rm = TRUE), 2),
-	median   = round(sapply(analysis_data[, numeric_vars, drop = FALSE], median, na.rm = TRUE), 2),
-	row.names = NULL
-)
-mean_median_table$mean   <- format(mean_median_table$mean,   big.mark = ",", scientific = FALSE, trim = TRUE)
-mean_median_table$median <- format(mean_median_table$median, big.mark = ",", scientific = FALSE, trim = TRUE)
-print(knitr::kable(mean_median_table, caption = "Mean and median — large gaps indicate skewness"))
+styled_kable(num_summary, caption = "Summary statistics for key numeric variables")
 
 # ── Standard deviations ───────────────────────────────────────────────────────
 sd_table <- data.frame(
-	variable  = numeric_vars,
-	sd        = round(sapply(analysis_data[, numeric_vars, drop = FALSE], sd, na.rm = TRUE), 2),
+	variable  = summary_vars,
+	sd        = round(sapply(analysis_data[, summary_vars, drop = FALSE], sd, na.rm = TRUE), 2),
 	row.names = NULL
 )
+sd_table$variable <- ifelse(
+	sd_table$variable %in% names(pretty_var_names),
+	pretty_var_names[sd_table$variable],
+	sd_table$variable
+)
 sd_table$sd <- format(sd_table$sd, big.mark = ",", scientific = FALSE, trim = TRUE)
-print(knitr::kable(sd_table, caption = "Standard deviation by variable"))
+styled_kable(sd_table, caption = "Standard deviation by variable")
 
 # ── IQR-based outlier count ───────────────────────────────────────────────────
 # An observation is flagged as an outlier if it falls more than 1.5 × IQR
 # below Q1 or above Q3 — the classic Tukey fence rule.
-outlier_stats <- do.call(rbind, lapply(numeric_vars, function(v) {
+outlier_stats <- do.call(rbind, lapply(summary_vars, function(v) {
 	x   <- analysis_data[[v]]
 	q1  <- quantile(x, 0.25, na.rm = TRUE)
 	q3  <- quantile(x, 0.75, na.rm = TRUE)
@@ -586,21 +620,33 @@ outlier_stats <- do.call(rbind, lapply(numeric_vars, function(v) {
 		high_outlier_count = sum(hi, na.rm = TRUE)
 	)
 }))
-print(knitr::kable(outlier_stats, caption = "IQR outlier summary (Tukey 1.5 × IQR rule)"))
+outlier_stats$variable <- ifelse(
+	outlier_stats$variable %in% names(pretty_var_names),
+	pretty_var_names[outlier_stats$variable],
+	outlier_stats$variable
+)
+styled_kable(outlier_stats, caption = "IQR outlier summary (Tukey 1.5 × IQR rule)")
 
 # ── Categorical summaries ─────────────────────────────────────────────────────
+pretty_cat_names <- c(
+	genre = "Genre",
+	mpaa_rating = "MPAA rating",
+	distributor = "Distributor"
+)
+
 cat_table <- do.call(rbind, lapply(categorical_vars, function(v) {
 	x         <- analysis_data[[v]]
 	x_valid   <- x[!(is.na(x) | trimws(x) == "")]
 	tab       <- sort(table(x_valid), decreasing = TRUE)
 	data.frame(
-		variable          = v,
+		variable          = ifelse(v %in% names(pretty_cat_names), pretty_cat_names[v], v),
 		unique_levels     = length(unique(x_valid)),
-		most_common       = names(tab)[1],
+		most_common       = trimws(names(tab)[1]),
 		most_common_count = as.integer(tab[1])
 	)
 }))
-print(knitr::kable(cat_table, caption = "Categorical variable summary"))
+names(cat_table) <- c("Variable", "Unique levels", "Most common", "Count")
+styled_kable(cat_table, caption = "Summary of categorical variables")
 ```
 
 ------------------------------------------------------------------------
