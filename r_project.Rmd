@@ -1856,6 +1856,16 @@ if (length(horror_elasticity) == 0) horror_elasticity <- NA
   points could inflate the estimated budget elasticity for those genres,
   making their interaction terms appear more significant
 
+```{r summary-metadata, include=FALSE}
+n_raw       <- nrow(movie_profit)
+n_clean     <- nrow(movie_profit_clean)
+n_removed   <- n_raw - n_clean
+pct_removed <- round(100 * n_removed / n_raw, 1)
+
+year_min <- format(min(movie_profit_clean$release_date, na.rm = TRUE), "%Y")
+year_max <- format(max(movie_profit_clean$release_date, na.rm = TRUE), "%Y")
+```
+
 # Part 4: Summary and Reflection
 
 ## Overview
